@@ -8,8 +8,8 @@ const app = express();
 app.use(express.json());
 app.use(cors());
 
-// Aapki provided Connection String
-const MONGO_URI = "mongodb+srv://biyahdaan_db_user:cUzpl0anIuBNuXb9@cluster0.hf1vhp3.mongodb.net/gramcart_db?retryWrites=true&w=majority";
+// Use environment variable for MongoDB or fallback to the provided string
+const MONGO_URI = process.env.MONGODB_URI || "mongodb+srv://biyahdaan_db_user:cUzpl0anIuBNuXb9@cluster0.hf1vhp3.mongodb.net/gramcart_db?retryWrites=true&w=majority";
 
 mongoose.connect(MONGO_URI)
   .then(() => console.log("✅ GramCart Database Connected Successfully"))
@@ -23,19 +23,8 @@ const UserSchema = new mongoose.Schema({
   role: { type: String, enum: ['user', 'vendor'], default: 'user' }
 });
 
-const VendorSchema = new mongoose.Schema({
-  name: String,
-  category: String,
-  price: Number,
-  image: String,
-  verified: Boolean,
-  description: String,
-  location: { lat: Number, lng: Number }
-});
-
 const BookingSchema = new mongoose.Schema({
   userId: String,
-  vendorId: String,
   vendorName: String,
   amount: Number,
   otp: String,
@@ -44,7 +33,6 @@ const BookingSchema = new mongoose.Schema({
 });
 
 const User = mongoose.model('User', UserSchema);
-const Vendor = mongoose.model('Vendor', VendorSchema);
 const Booking = mongoose.model('Booking', BookingSchema);
 
 // API Routes
@@ -52,25 +40,24 @@ app.post('/api/register', async (req, res) => {
   try {
     const user = new User(req.body);
     await user.save();
-    const token = jwt.sign({ id: user._id }, 'GRAM_SECRET_KEY');
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET || 'GRAM_SECRET_KEY');
     res.json({ token, user: { id: user._id, name: user.name, email: user.email, role: user.role } });
-  } catch (err) { res.status(400).json({ error: err.message }); }
+  } catch (err) { 
+    res.status(400).json({ error: "Email already registered" }); 
+  }
 });
 
 app.post('/api/login', async (req, res) => {
   const { email, password } = req.body;
   const user = await User.findOne({ email, password });
   if (user) {
-    const token = jwt.sign({ id: user._id }, 'GRAM_SECRET_KEY');
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET || 'GRAM_SECRET_KEY');
     res.json({ token, user: { id: user._id, name: user.name, email: user.email, role: user.role } });
   } else {
     res.status(401).json({ error: "Invalid Credentials" });
   }
 });
 
-app.get('/api/vendors', async (req, res) => {
-  const vendors = await Vendor.find();
-  res.json(vendors);
-});
-
-app.listen(5000, () => console.log("🚀 Server running on port 5000"));
+// Render/Deployment Port Logic
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
