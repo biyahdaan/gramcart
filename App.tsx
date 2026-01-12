@@ -4,7 +4,8 @@ import { Language, User, Translations, UserRole, Translation } from './types';
 import { CATEGORIES } from './constants';
 import { LanguageSwitch } from './components/LanguageSwitch';
 
-const API_BASE_URL = "/api"; // Vercel/Render self-proxy handles this
+// IMPORTANT: Replace this with your actual Render backend URL if not hosting frontend and backend on the same domain.
+const API_BASE_URL = "https://biyahdaan.onrender.com/api"; 
 
 const App: React.FC = () => {
   const [lang, setLang] = useState<Language>(Language.EN);
@@ -31,9 +32,12 @@ const App: React.FC = () => {
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE_URL}/search?cat=${cat}`);
-      if (res.ok) setData(await res.json());
+      if (res.ok) {
+        const json = await res.json();
+        setData(json);
+      }
     } catch (e) {
-      console.error("Search failed, check if server is running");
+      console.error("Fetch Data Error:", e);
     } finally { setLoading(false); }
   };
 
@@ -41,13 +45,17 @@ const App: React.FC = () => {
     e.preventDefault();
     setLoading(true);
     const endpoint = authMode === 'login' ? '/login' : '/register';
+    
     try {
+      console.log(`Attempting to connect to: ${API_BASE_URL}${endpoint}`);
       const res = await fetch(`${API_BASE_URL}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(authForm)
       });
+      
       const result = await res.json();
+      
       if (res.ok) {
         localStorage.setItem('gramcart_user', JSON.stringify(result.user));
         localStorage.setItem('gramcart_token', result.token);
@@ -55,10 +63,11 @@ const App: React.FC = () => {
         if (result.user.role === 'vendor') setView('vendor-dashboard');
         else setView('home');
       } else {
-        alert(result.error || "Auth Failed");
+        alert(result.error || "Authentication Failed. Please check your credentials.");
       }
     } catch (err) {
-      alert("Server Connection Error");
+      console.error("Detailed Auth Error:", err);
+      alert("SERVER CONNECTION ERROR: Backend is not responding. Please make sure " + API_BASE_URL + " is online.");
     } finally { setLoading(false); }
   };
 
@@ -75,20 +84,24 @@ const App: React.FC = () => {
             {authMode === 'register' && (
               <input 
                 placeholder="Full Name" 
-                className="w-full bg-gray-50 p-4 rounded-2xl border-none outline-none ring-2 ring-gray-100 focus:ring-blue-500 transition-all"
+                className="w-full bg-gray-50 p-4 rounded-2xl border-none outline-none ring-2 ring-gray-100 focus:ring-blue-500 transition-all text-gray-800"
                 onChange={e => setAuthForm({...authForm, name: e.target.value})}
+                required
               />
             )}
             <input 
               placeholder="Email" 
-              className="w-full bg-gray-50 p-4 rounded-2xl border-none outline-none ring-2 ring-gray-100 focus:ring-blue-500 transition-all"
+              type="email"
+              className="w-full bg-gray-50 p-4 rounded-2xl border-none outline-none ring-2 ring-gray-100 focus:ring-blue-500 transition-all text-gray-800"
               onChange={e => setAuthForm({...authForm, email: e.target.value})}
+              required
             />
             <input 
               placeholder="Password" 
               type="password"
-              className="w-full bg-gray-50 p-4 rounded-2xl border-none outline-none ring-2 ring-gray-100 focus:ring-blue-500 transition-all"
+              className="w-full bg-gray-50 p-4 rounded-2xl border-none outline-none ring-2 ring-gray-100 focus:ring-blue-500 transition-all text-gray-800"
               onChange={e => setAuthForm({...authForm, password: e.target.value})}
+              required
             />
             
             {authMode === 'register' && (
@@ -96,18 +109,21 @@ const App: React.FC = () => {
                 <button 
                   type="button"
                   onClick={() => setAuthForm({...authForm, role: 'user'})}
-                  className={`flex-1 py-2 rounded-xl text-xs font-bold ${authForm.role === 'user' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400'}`}
+                  className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${authForm.role === 'user' ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400'}`}
                 >Customer</button>
                 <button 
                   type="button"
                   onClick={() => setAuthForm({...authForm, role: 'vendor'})}
-                  className={`flex-1 py-2 rounded-xl text-xs font-bold ${authForm.role === 'vendor' ? 'bg-purple-600 text-white shadow-lg' : 'text-gray-400'}`}
+                  className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${authForm.role === 'vendor' ? 'bg-purple-600 text-white shadow-lg' : 'text-gray-400'}`}
                 >Vendor</button>
               </div>
             )}
 
-            <button className={`w-full py-4 rounded-2xl font-black text-white shadow-xl transform active:scale-95 transition-all ${authForm.role === 'vendor' ? 'bg-purple-600' : 'bg-blue-600'}`}>
-              {authMode === 'login' ? 'LOGIN' : 'CREATE ACCOUNT'}
+            <button 
+              disabled={loading}
+              className={`w-full py-4 rounded-2xl font-black text-white shadow-xl transform active:scale-95 transition-all ${loading ? 'opacity-50' : ''} ${authForm.role === 'vendor' ? 'bg-purple-600' : 'bg-blue-600'}`}
+            >
+              {loading ? <i className="fas fa-circle-notch fa-spin"></i> : (authMode === 'login' ? 'LOGIN' : 'CREATE ACCOUNT')}
             </button>
           </form>
 
@@ -165,12 +181,16 @@ const App: React.FC = () => {
                 </div>
 
                 <div className="space-y-3">
-                  {vendor.services?.map((s: any) => (
-                    <div key={s._id} className="flex justify-between items-center bg-gray-50 p-3 rounded-2xl">
-                      <span className="text-xs font-bold text-gray-700">{s.title || s.category.toUpperCase()}</span>
-                      <span className="text-xs font-black text-blue-600">₹{s.pricePerDay}/day</span>
-                    </div>
-                  ))}
+                  {vendor.services?.length > 0 ? (
+                    vendor.services.map((s: any) => (
+                      <div key={s._id} className="flex justify-between items-center bg-gray-50 p-3 rounded-2xl">
+                        <span className="text-xs font-bold text-gray-700">{s.title || s.category.toUpperCase()}</span>
+                        <span className="text-xs font-black text-blue-600">₹{s.pricePerDay}/day</span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-[10px] text-gray-400 italic">No services listed yet</p>
+                  )}
                 </div>
 
                 <button className="w-full mt-5 bg-blue-600 text-white py-4 rounded-2xl font-black text-xs uppercase shadow-lg active:scale-95 transition-all">

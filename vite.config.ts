@@ -17,5 +17,12 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    proxy: {
+      '/api': {
+        target: 'https://biyahdaan.onrender.com',
+        changeOrigin: true,
+        secure: false,
+      },
+    },
   },
 });
