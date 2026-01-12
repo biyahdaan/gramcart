@@ -35,6 +35,20 @@ const BookingSchema = new mongoose.Schema({
 const User = mongoose.model('User', UserSchema);
 const Booking = mongoose.model('Booking', BookingSchema);
 
+/**
+ * HEALTH CHECK ROUTE
+ * This fixes the "Cannot GET /" error on Render.
+ */
+app.get('/', (req, res) => {
+  const dbStatus = mongoose.connection.readyState === 1 ? "Connected ✅" : "Disconnected ❌";
+  res.status(200).json({
+    status: "GramCart Server is LIVE 🚀",
+    database: dbStatus,
+    message: "Use /api/login or /api/register for authentication.",
+    timestamp: new Date().toISOString()
+  });
+});
+
 // API Routes
 app.post('/api/register', async (req, res) => {
   try {
