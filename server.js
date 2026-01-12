@@ -5,10 +5,16 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 
 const app = express();
-app.use(express.json());
-app.use(cors());
 
-// Use environment variable for MongoDB or fallback to the provided string
+// CORS configuration to allow your frontend to communicate with this backend
+app.use(cors({
+  origin: '*', // For production, you can replace '*' with your specific frontend URL
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+app.use(express.json());
+
 const MONGO_URI = process.env.MONGODB_URI || "mongodb+srv://biyahdaan_db_user:cUzpl0anIuBNuXb9@cluster0.hf1vhp3.mongodb.net/gramcart_db?retryWrites=true&w=majority";
 
 mongoose.connect(MONGO_URI)
@@ -23,33 +29,20 @@ const UserSchema = new mongoose.Schema({
   role: { type: String, enum: ['user', 'vendor'], default: 'user' }
 });
 
-const BookingSchema = new mongoose.Schema({
-  userId: String,
-  vendorName: String,
-  amount: Number,
-  otp: String,
-  status: { type: String, default: 'confirmed' },
-  date: { type: Date, default: Date.now }
-});
-
 const User = mongoose.model('User', UserSchema);
-const Booking = mongoose.model('Booking', BookingSchema);
 
-/**
- * HEALTH CHECK ROUTE
- * This fixes the "Cannot GET /" error on Render.
- */
+// Health Check Route
 app.get('/', (req, res) => {
-  const dbStatus = mongoose.connection.readyState === 1 ? "Connected ✅" : "Disconnected ❌";
   res.status(200).json({
     status: "GramCart Server is LIVE 🚀",
-    database: dbStatus,
-    message: "Use /api/login or /api/register for authentication.",
-    timestamp: new Date().toISOString()
+    database: mongoose.connection.readyState === 1 ? "Connected ✅" : "Disconnected ❌",
+    endpoints: {
+      auth: "/api/login, /api/register"
+    }
   });
 });
 
-// API Routes
+// Auth Routes
 app.post('/api/register', async (req, res) => {
   try {
     const user = new User(req.body);
@@ -62,16 +55,19 @@ app.post('/api/register', async (req, res) => {
 });
 
 app.post('/api/login', async (req, res) => {
-  const { email, password } = req.body;
-  const user = await User.findOne({ email, password });
-  if (user) {
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET || 'GRAM_SECRET_KEY');
-    res.json({ token, user: { id: user._id, name: user.name, email: user.email, role: user.role } });
-  } else {
-    res.status(401).json({ error: "Invalid Credentials" });
+  try {
+    const { email, password } = req.body;
+    const user = await User.findOne({ email, password });
+    if (user) {
+      const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET || 'GRAM_SECRET_KEY');
+      res.json({ token, user: { id: user._id, name: user.name, email: user.email, role: user.role } });
+    } else {
+      res.status(401).json({ error: "Invalid Credentials" });
+    }
+  } catch (err) {
+    res.status(500).json({ error: "Server error" });
   }
 });
 
-// Render/Deployment Port Logic
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));

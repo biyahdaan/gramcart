@@ -1,18 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
-import { Language, UserRole, User, Translation, Translations, Vendor, Booking } from './types';
+import { Language, User, Translations } from './types';
 import { CATEGORIES, MOCK_VENDORS, BANNERS } from './constants';
 import { LanguageSwitch } from './components/LanguageSwitch';
 import { VendorCard } from './components/VendorCard';
 
-/**
- * REPLACEMENT INSTRUCTIONS:
- * 1. Jab aap Render par Backend deploy karein, uska URL yahan daalein.
- * 2. Example: const API_BASE_URL = "https://gramcart-backend.onrender.com";
- */
-const API_BASE_URL = window.location.hostname === 'localhost' 
-  ? "http://localhost:5000" 
-  : ""; // Render URL will be automatically handled if hosted on same domain or add URL here.
+// Pointing to your live Render backend
+const API_BASE_URL = "https://biyahdaan.onrender.com";
 
 const App: React.FC = () => {
   const [lang, setLang] = useState<Language>(Language.EN);
@@ -26,8 +20,12 @@ const App: React.FC = () => {
   useEffect(() => {
     const savedUser = localStorage.getItem('gramcart_user');
     if (savedUser) {
-      setUser(JSON.parse(savedUser));
-      setAuthMode(null);
+      try {
+        setUser(JSON.parse(savedUser));
+        setAuthMode(null);
+      } catch (e) {
+        localStorage.removeItem('gramcart_user');
+      }
     }
   }, []);
 
@@ -50,27 +48,29 @@ const App: React.FC = () => {
         localStorage.setItem('gramcart_token', data.token);
         setAuthMode(null);
       } else {
-        alert(data.error || "Login fail ho gaya!");
+        alert(data.error || "Login/Signup failed. Please check credentials.");
       }
     } catch (err) {
-      alert("Backend connect nahi ho raha. Kya aapne Render URL dala?");
+      alert("Cannot connect to server. Ensure your backend is running at: " + API_BASE_URL);
+      console.error("Auth Error:", err);
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleLogout = () => {
-    localStorage.clear();
+    localStorage.removeItem('gramcart_user');
+    localStorage.removeItem('gramcart_token');
     setUser(null);
     setAuthMode('login');
   };
 
   if (authMode && !user) {
     return (
-      <div className="max-w-md mx-auto min-h-screen bg-blue-600 flex flex-col p-8 justify-center">
+      <div className="max-w-md mx-auto min-h-screen bg-blue-600 flex flex-col p-8 justify-center font-sans">
         <div className="bg-white p-8 rounded-[2.5rem] shadow-2xl">
           <h1 className="text-3xl font-black text-blue-600 mb-2 italic">GramCart</h1>
-          <p className="text-gray-400 text-[10px] mb-8 font-black uppercase tracking-widest">Village Marketplace Login</p>
+          <p className="text-gray-400 text-[10px] mb-8 font-black uppercase tracking-widest">Rural Market Login</p>
           
           <form onSubmit={handleAuth} className="space-y-4">
             {authMode === 'register' && (
@@ -79,22 +79,20 @@ const App: React.FC = () => {
             <input required type="email" placeholder="Email Address" className="w-full bg-gray-50 border border-gray-100 p-4 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500" onChange={e => setFormData({...formData, email: e.target.value})} />
             <input required type="password" placeholder="Password" className="w-full bg-gray-50 border border-gray-100 p-4 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500" onChange={e => setFormData({...formData, password: e.target.value})} />
             <button disabled={isLoading} className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black shadow-lg active:scale-95 transition-all">
-              {isLoading ? "Connecting DB..." : authMode.toUpperCase()}
+              {isLoading ? "Connecting..." : authMode.toUpperCase()}
             </button>
           </form>
           
           <button onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')} className="w-full mt-6 text-gray-400 text-[10px] font-black uppercase tracking-widest">
-            {authMode === 'login' ? "Create New Account" : "Already have an account? Login"}
+            {authMode === 'login' ? "Create New Account" : "Back to Login"}
           </button>
         </div>
-        <p className="text-white/50 text-[10px] text-center mt-8 font-bold uppercase tracking-widest">Secured by MongoDB Atlas</p>
       </div>
     );
   }
 
   return (
-    <div className="max-w-md mx-auto min-h-screen bg-gray-50 pb-20">
-      {/* Header */}
+    <div className="max-w-md mx-auto min-h-screen bg-gray-50 pb-20 font-sans">
       <div className="bg-blue-600 p-6 rounded-b-[2.5rem] shadow-xl">
         <div className="flex justify-between items-center text-white mb-6">
           <div className="flex items-center gap-2">
@@ -109,7 +107,6 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      {/* Categories */}
       <div className="p-6">
         <h2 className="font-black text-gray-900 mb-5 flex items-center gap-2 text-lg">
            <div className="w-1 h-5 bg-blue-600 rounded-full"></div>
@@ -121,13 +118,12 @@ const App: React.FC = () => {
               <div className={`${cat.color} w-16 h-16 rounded-3xl flex items-center justify-center text-2xl shadow-sm`}>
                 <i className={`fas ${cat.icon}`}></i>
               </div>
-              <span className="text-[10px] font-black text-gray-500 uppercase tracking-tighter">{cat.name}</span>
+              <span className="text-[10px] font-black text-gray-500 uppercase tracking-tighter text-center">{cat.name}</span>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Offers */}
       <div className="px-6 mb-8 flex gap-4 overflow-x-auto no-scrollbar">
         {BANNERS.map(b => (
           <div key={b.id} className={`${b.color} min-w-[80%] p-6 rounded-3xl text-white shadow-lg`}>
@@ -137,7 +133,6 @@ const App: React.FC = () => {
         ))}
       </div>
 
-      {/* Vendors */}
       <div className="px-6">
         <div className="flex justify-between items-end mb-6">
           <h2 className="font-black text-gray-900 text-lg flex items-center gap-2">
@@ -153,7 +148,6 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      {/* Navbar */}
       <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white/80 backdrop-blur-md h-20 flex items-center justify-around border-t border-gray-100 shadow-2xl z-50 px-8 rounded-t-3xl">
         <button className="text-blue-600"><i className="fas fa-home text-xl"></i></button>
         <button className="text-gray-300"><i className="fas fa-calendar-check text-xl"></i></button>
