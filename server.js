@@ -5,124 +5,120 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 
 const app = express();
-app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'], allowedHeaders: ['Content-Type', 'Authorization'] }));
+
+// --- MIDDLEWARE ---
+// CORS को पूरी तरह ओपन किया गया है ताकि किसी भी डोमेन से फ्रंटएंड कनेक्ट हो सके
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json());
 
+// --- DATABASE CONNECTION ---
 const MONGO_URI = process.env.MONGODB_URI || "mongodb+srv://biyahdaan_db_user:cUzpl0anIuBNuXb9@cluster0.hf1vhp3.mongodb.net/gramcart_db?retryWrites=true&w=majority";
 
 mongoose.connect(MONGO_URI)
   .then(() => console.log("🚀 GramCart Scalable Engine Online"))
-  .catch(err => console.error("❌ DB Error:", err));
+  .catch(err => console.error("❌ DB Connection Error:", err));
 
-// --- ADVANCED SCHEMAS ---
-
-const UserSchema = new mongoose.Schema({
+// --- SCHEMAS ---
+const User = mongoose.models.User || mongoose.model('User', new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, unique: true, index: true },
   password: { type: String, required: true },
-  role: { type: String, enum: ['user', 'vendor'], default: 'user' },
-  isVerified: { type: Boolean, default: false }
-});
+  role: { type: String, enum: ['user', 'vendor'], default: 'user' }
+}));
 
-const VendorSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', unique: true, index: true },
+const Vendor = mongoose.models.Vendor || mongoose.model('Vendor', new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', unique: true },
   businessName: { type: String, required: true, index: true },
-  location: {
-    type: { type: String, enum: ['Point'], default: 'Point' },
-    coordinates: { type: [Number], required: true } // [lng, lat]
-  },
-  rating: { type: Number, default: 5, index: true },
-  reviewsCount: { type: Number, default: 0 },
-  isVerified: { type: Boolean, default: false, index: true }
-});
-VendorSchema.index({ location: '2dsphere' });
+  rating: { type: Number, default: 5 },
+  isVerified: { type: Boolean, default: false }
+}));
 
-const ServiceSchema = new mongoose.Schema({
+const Service = mongoose.models.Service || mongoose.model('Service', new mongoose.Schema({
   vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor', index: true },
   category: { type: String, index: true },
   title: String,
-  pricePerDay: { type: Number, index: true },
-  peakSeasonPrice: Number,
-  inventory: [{ itemName: String, quantity: Number }],
-  minBookingDays: { type: Number, default: 1 }
+  pricePerDay: Number
+}));
+
+// --- ROUTES ---
+
+// 1. Root Route Fix: Render par "Cannot GET /" को ठीक करने के लिए
+app.get('/', (req, res) => {
+  res.json({ 
+    status: "GramCart API is Running",
+    version: "1.0.0",
+    environment: process.env.NODE_ENV || "development"
+  });
 });
 
-const ComboSchema = new mongoose.Schema({
-  vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor', index: true },
-  title: String, // e.g., "Mega Shaadi Package"
-  services: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Service' }],
-  originalPrice: Number,
-  discountPrice: Number, // Value Deal
-  isValueDeal: { type: Boolean, default: true }
-});
-
-const BookingSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
-  vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor', index: true },
-  items: Array,
-  totalAmount: Number,
-  status: { type: String, default: 'pending', index: true },
-  otp: String,
-  date: { type: Date, default: Date.now }
-});
-
-const User = mongoose.model('User', UserSchema);
-const Vendor = mongoose.model('Vendor', VendorSchema);
-const Service = mongoose.model('Service', ServiceSchema);
-const Combo = mongoose.model('Combo', ComboSchema);
-const Booking = mongoose.model('Booking', BookingSchema);
-
-// --- API ---
-
-const authenticate = (req, res, next) => {
-  const token = req.headers.authorization?.split(' ')[1];
-  if (!token) return res.status(401).json({ error: "Unauthorized" });
+// 2. Auth: Register
+app.post('/api/register', async (req, res) => {
   try {
-    const decoded = jwt.verify(token, 'GRAM_SECRET_KEY');
-    req.userId = decoded.id;
-    next();
-  } catch (err) { res.status(401).json({ error: "Invalid token" }); }
-};
+    const { name, email, password, role } = req.body;
+    const existing = await User.findOne({ email });
+    if (existing) return res.status(400).json({ error: "Email already registered" });
 
-// Scalable Paginated Search
+    const user = new User({ name, email, password, role });
+    await user.save();
+
+    if (role === 'vendor') {
+      const vendor = new Vendor({ userId: user._id, businessName: `${name}'s Shop` });
+      await vendor.save();
+    }
+
+    const token = jwt.sign({ id: user._id }, 'GRAM_SECRET_KEY');
+    res.status(201).json({ token, user });
+  } catch (err) {
+    res.status(500).json({ error: "Registration failed: " + err.message });
+  }
+});
+
+// 3. Auth: Login
+app.post('/api/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const user = await User.findOne({ email, password });
+    if (!user) return res.status(401).json({ error: "Invalid credentials" });
+
+    const token = jwt.sign({ id: user._id }, 'GRAM_SECRET_KEY');
+    res.json({ token, user });
+  } catch (err) {
+    res.status(500).json({ error: "Login error" });
+  }
+});
+
+// 4. Search Vendors
 app.get('/api/search', async (req, res) => {
   try {
-    const { lat, lng, cat, page = 1, limit = 20 } = req.query;
-    const skip = (page - 1) * limit;
-
-    let query = {};
-    if (lat && lng) {
-      query.location = {
-        $near: {
-          $geometry: { type: "Point", coordinates: [parseFloat(lng), parseFloat(lat)] },
-          $maxDistance: 25000 
-        }
-      };
-    }
-    if (cat) query.category = cat;
-
-    const vendors = await Vendor.find(query).skip(skip).limit(parseInt(limit)).lean();
+    const { cat } = req.query;
+    const vendors = await Vendor.find().lean();
     
-    // Enrich with Services and Combos
     const results = await Promise.all(vendors.map(async (v) => {
-      const services = await Service.find({ vendorId: v._id });
-      const combos = await Combo.find({ vendorId: v._id });
-      return { ...v, services, combos };
+      let serviceQuery = { vendorId: v._id };
+      if (cat) serviceQuery.category = cat;
+      const services = await Service.find(serviceQuery);
+      return { ...v, services };
     }));
 
-    res.json(results);
-  } catch (err) { res.status(500).json({ error: "Search failed" }); }
+    const filtered = cat ? results.filter(v => v.services.length > 0) : results;
+    res.json(filtered);
+  } catch (err) {
+    res.status(500).json({ error: "Search failed" });
+  }
 });
 
-// Vendor Action: Create Combo
-app.post('/api/vendor/combos', authenticate, async (req, res) => {
-  try {
-    const vendor = await Vendor.findOne({ userId: req.userId });
-    const combo = new Combo({ ...req.body, vendorId: vendor._id });
-    await combo.save();
-    res.json(combo);
-  } catch (err) { res.status(500).json({ error: "Failed to create combo" }); }
-});
-
+// --- SERVER START ---
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`
+  ******************************************
+  ✅ Server is active on port ${PORT}
+  🔗 Local: http://localhost:${PORT}
+  🌍 Health Check: http://localhost:${PORT}/
+  ******************************************
+  `);
+});
