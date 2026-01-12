@@ -11,6 +11,7 @@ export enum UserRole {
 
 export interface User {
   id: string;
+  _id?: string; // Support MongoDB style ID
   name: string;
   email: string;
   role: UserRole;

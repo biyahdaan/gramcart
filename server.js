@@ -8,7 +8,7 @@ const app = express();
 
 // CORS configuration to allow your frontend to communicate with this backend
 app.use(cors({
-  origin: '*', // For production, you can replace '*' with your specific frontend URL
+  origin: '*', 
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
@@ -29,16 +29,25 @@ const UserSchema = new mongoose.Schema({
   role: { type: String, enum: ['user', 'vendor'], default: 'user' }
 });
 
+const VendorSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  businessName: String,
+  category: String,
+  description: String,
+  serviceArea: Number, // in KM
+  price: Number,
+  verified: { type: Boolean, default: false },
+  rating: { type: Number, default: 5.0 }
+});
+
 const User = mongoose.model('User', UserSchema);
+const Vendor = mongoose.model('Vendor', VendorSchema);
 
 // Health Check Route
 app.get('/', (req, res) => {
   res.status(200).json({
     status: "GramCart Server is LIVE 🚀",
-    database: mongoose.connection.readyState === 1 ? "Connected ✅" : "Disconnected ❌",
-    endpoints: {
-      auth: "/api/login, /api/register"
-    }
+    database: mongoose.connection.readyState === 1 ? "Connected ✅" : "Disconnected ❌"
   });
 });
 
@@ -66,6 +75,33 @@ app.post('/api/login', async (req, res) => {
     }
   } catch (err) {
     res.status(500).json({ error: "Server error" });
+  }
+});
+
+// Vendor Specific Route
+app.post('/api/register-vendor', async (req, res) => {
+  try {
+    const { userId, businessName, category, description, serviceArea, price } = req.body;
+    
+    // Check if user exists and is a vendor
+    const user = await User.findById(userId);
+    if (!user || user.role !== 'vendor') {
+      return res.status(403).json({ error: "User is not authorized as a vendor" });
+    }
+
+    const vendor = new Vendor({
+      userId,
+      businessName,
+      category,
+      description,
+      serviceArea,
+      price
+    });
+    
+    await vendor.save();
+    res.json({ success: true, vendor });
+  } catch (err) {
+    res.status(500).json({ error: "Error registering vendor profile" });
   }
 });
 

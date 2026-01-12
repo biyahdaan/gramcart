@@ -1,19 +1,19 @@
 
 import React, { useState, useEffect } from 'react';
-import { Language, User, Translations } from './types';
+import { Language, User, Translations, UserRole, Translation } from './types';
 import { CATEGORIES, MOCK_VENDORS, BANNERS } from './constants';
 import { LanguageSwitch } from './components/LanguageSwitch';
 import { VendorCard } from './components/VendorCard';
 
-// Pointing to your live Render backend
 const API_BASE_URL = "https://biyahdaan.onrender.com";
 
 const App: React.FC = () => {
   const [lang, setLang] = useState<Language>(Language.EN);
   const [user, setUser] = useState<User | null>(null);
-  const [authMode, setAuthMode] = useState<'login' | 'register' | null>('login');
+  const [authMode, setAuthMode] = useState<'login' | 'register' | 'vendor-setup' | null>('login');
   const [isLoading, setIsLoading] = useState(false);
-  const [formData, setFormData] = useState({ name: '', email: '', password: '' });
+  const [formData, setFormData] = useState({ name: '', email: '', password: '', role: UserRole.USER });
+  const [vendorData, setVendorData] = useState({ businessName: '', category: 'tent', description: '', serviceArea: 25, price: 0 });
   
   const t = Translations[lang];
 
@@ -21,7 +21,8 @@ const App: React.FC = () => {
     const savedUser = localStorage.getItem('gramcart_user');
     if (savedUser) {
       try {
-        setUser(JSON.parse(savedUser));
+        const parsed = JSON.parse(savedUser);
+        setUser(parsed);
         setAuthMode(null);
       } catch (e) {
         localStorage.removeItem('gramcart_user');
@@ -46,13 +47,46 @@ const App: React.FC = () => {
         setUser(data.user);
         localStorage.setItem('gramcart_user', JSON.stringify(data.user));
         localStorage.setItem('gramcart_token', data.token);
-        setAuthMode(null);
+        
+        if (data.user.role === UserRole.VENDOR && authMode === 'register') {
+          setAuthMode('vendor-setup');
+        } else {
+          setAuthMode(null);
+        }
       } else {
-        alert(data.error || "Login/Signup failed. Please check credentials.");
+        alert(data.error || "Action failed.");
       }
     } catch (err) {
-      alert("Cannot connect to server. Ensure your backend is running at: " + API_BASE_URL);
-      console.error("Auth Error:", err);
+      alert("Cannot connect to server.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleVendorRegister = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    try {
+      // Accessing _id as allowed by updated User interface in types.ts
+      const userId = user?.id || user?._id;
+      const response = await fetch(`${API_BASE_URL}/api/register-vendor`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('gramcart_token')}`
+        },
+        body: JSON.stringify({ ...vendorData, userId })
+      });
+      
+      if (response.ok) {
+        alert("Vendor Profile Created Successfully!");
+        setAuthMode(null);
+      } else {
+        const data = await response.json();
+        alert(data.error || "Profile setup failed.");
+      }
+    } catch (err) {
+      alert("Error connecting to server.");
     } finally {
       setIsLoading(false);
     }
@@ -65,16 +99,50 @@ const App: React.FC = () => {
     setAuthMode('login');
   };
 
+  if (authMode === 'vendor-setup') {
+    return (
+      <div className="max-w-md mx-auto min-h-screen bg-purple-600 flex flex-col p-8 justify-center font-sans">
+        <div className="bg-white p-8 rounded-[2.5rem] shadow-2xl">
+          <h1 className="text-2xl font-black text-purple-600 mb-2">Vendor Details</h1>
+          <p className="text-gray-400 text-[10px] mb-6 font-black uppercase tracking-widest">Setup your rural business</p>
+          <form onSubmit={handleVendorRegister} className="space-y-3">
+            <input required type="text" placeholder="Business Name" className="w-full bg-gray-50 border p-4 rounded-2xl" onChange={e => setVendorData({...vendorData, businessName: e.target.value})} />
+            <select className="w-full bg-gray-50 border p-4 rounded-2xl" onChange={e => setVendorData({...vendorData, category: e.target.value})}>
+              <option value="tent">Tent House</option>
+              <option value="dj">DJ & Sound</option>
+              <option value="catering">Catering</option>
+              <option value="electric">Lighting</option>
+            </select>
+            <textarea required placeholder="Description (Service Details)" className="w-full bg-gray-50 border p-4 rounded-2xl" onChange={e => setVendorData({...vendorData, description: e.target.value})} />
+            <div className="flex gap-2">
+               <input required type="number" placeholder="Area (KM)" className="w-1/2 bg-gray-50 border p-4 rounded-2xl" onChange={e => setVendorData({...vendorData, serviceArea: parseInt(e.target.value)})} />
+               <input required type="number" placeholder="Base Price (₹)" className="w-1/2 bg-gray-50 border p-4 rounded-2xl" onChange={e => setVendorData({...vendorData, price: parseInt(e.target.value)})} />
+            </div>
+            <button disabled={isLoading} className="w-full bg-purple-600 text-white py-4 rounded-2xl font-black shadow-lg">
+              {isLoading ? "Saving..." : "START SELLING"}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   if (authMode && !user) {
     return (
       <div className="max-w-md mx-auto min-h-screen bg-blue-600 flex flex-col p-8 justify-center font-sans">
         <div className="bg-white p-8 rounded-[2.5rem] shadow-2xl">
           <h1 className="text-3xl font-black text-blue-600 mb-2 italic">GramCart</h1>
-          <p className="text-gray-400 text-[10px] mb-8 font-black uppercase tracking-widest">Rural Market Login</p>
+          <p className="text-gray-400 text-[10px] mb-8 font-black uppercase tracking-widest">Rural Market {authMode.toUpperCase()}</p>
           
           <form onSubmit={handleAuth} className="space-y-4">
             {authMode === 'register' && (
-              <input required type="text" placeholder="Full Name" className="w-full bg-gray-50 border border-gray-100 p-4 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500" onChange={e => setFormData({...formData, name: e.target.value})} />
+              <>
+                <input required type="text" placeholder="Full Name" className="w-full bg-gray-50 border border-gray-100 p-4 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500" onChange={e => setFormData({...formData, name: e.target.value})} />
+                <div className="flex bg-gray-100 p-1 rounded-2xl mb-2">
+                  <button type="button" onClick={() => setFormData({...formData, role: UserRole.USER})} className={`flex-1 py-2 rounded-xl text-xs font-black ${formData.role === UserRole.USER ? 'bg-white text-blue-600 shadow' : 'text-gray-400'}`}>USER</button>
+                  <button type="button" onClick={() => setFormData({...formData, role: UserRole.VENDOR})} className={`flex-1 py-2 rounded-xl text-xs font-black ${formData.role === UserRole.VENDOR ? 'bg-white text-purple-600 shadow' : 'text-gray-400'}`}>VENDOR</button>
+                </div>
+              </>
             )}
             <input required type="email" placeholder="Email Address" className="w-full bg-gray-50 border border-gray-100 p-4 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500" onChange={e => setFormData({...formData, email: e.target.value})} />
             <input required type="password" placeholder="Password" className="w-full bg-gray-50 border border-gray-100 p-4 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500" onChange={e => setFormData({...formData, password: e.target.value})} />
@@ -118,7 +186,10 @@ const App: React.FC = () => {
               <div className={`${cat.color} w-16 h-16 rounded-3xl flex items-center justify-center text-2xl shadow-sm`}>
                 <i className={`fas ${cat.icon}`}></i>
               </div>
-              <span className="text-[10px] font-black text-gray-500 uppercase tracking-tighter text-center">{cat.name}</span>
+              <span className="text-[10px] font-black text-gray-500 uppercase tracking-tighter text-center">
+                {/* Translation type is now imported correctly above */}
+                {lang === Language.HI ? t[cat.id as keyof Translation] || cat.name : cat.name}
+              </span>
             </div>
           ))}
         </div>
@@ -151,7 +222,7 @@ const App: React.FC = () => {
       <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white/80 backdrop-blur-md h-20 flex items-center justify-around border-t border-gray-100 shadow-2xl z-50 px-8 rounded-t-3xl">
         <button className="text-blue-600"><i className="fas fa-home text-xl"></i></button>
         <button className="text-gray-300"><i className="fas fa-calendar-check text-xl"></i></button>
-        <button onClick={handleLogout} className="text-gray-300"><i className="fas fa-user-circle text-xl"></i></button>
+        <button onClick={handleLogout} className="text-gray-300"><i className="fas fa-sign-out-alt text-xl"></i></button>
       </div>
       
       <style>{`
