@@ -1,0 +1,7 @@
+{
+  "name": "GramCart - Rural Hyper-local Marketplace",
+  "description": "A highly secure, Flipkart-style hyper-local marketplace for rural areas, featuring language switching, dual-mode (User/Vendor), and location-based vendor discovery.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
