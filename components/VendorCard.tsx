@@ -5,9 +5,10 @@ import { Vendor, Translation } from '../types';
 interface Props {
   vendor: Vendor;
   t: Translation;
+  onBook?: (vendor: Vendor) => void;
 }
 
-export const VendorCard: React.FC<Props> = ({ vendor, t }) => {
+export const VendorCard: React.FC<Props> = ({ vendor, t, onBook }) => {
   return (
     <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100 hover:shadow-md transition-shadow">
       <div className="relative h-40">
@@ -34,7 +35,10 @@ export const VendorCard: React.FC<Props> = ({ vendor, t }) => {
             <span className="text-lg font-bold text-gray-900">₹{vendor.price}</span>
             <span className="text-gray-400 text-[10px] ml-1">onwards</span>
           </div>
-          <button className="bg-blue-600 text-white text-xs font-bold px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
+          <button 
+            onClick={() => onBook?.(vendor)}
+            className="bg-blue-600 text-white text-xs font-bold px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors active:scale-95"
+          >
             {t.bookNow}
           </button>
         </div>
