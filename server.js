@@ -1,4 +1,3 @@
-
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -12,7 +11,7 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
-app.use(express.json({ limit: '15mb' })); // Increased limit for compressed images
+app.use(express.json({ limit: '15mb' })); 
 
 // --- DATABASE CONNECTION ---
 const MONGO_URI = process.env.MONGODB_URI || "mongodb+srv://biyahdaan_db_user:cUzpl0anIuBNuXb9@cluster0.hf1vhp3.mongodb.net/gramcart_db?retryWrites=true&w=majority";
@@ -57,27 +56,31 @@ const ServiceSchema = new mongoose.Schema({
 const Service = mongoose.models.Service || mongoose.model('Service', ServiceSchema);
 
 const BookingSchema = new mongoose.Schema({
-  customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
-  vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor', index: true },
-  serviceId: { type: mongoose.Schema.Types.ObjectId, ref: 'Service' },
-  startDate: Date,
-  endDate: Date,
-  address: String,
-  totalAmount: Number,
-  advanceProof: String,
+  customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, required: true },
+  vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor', index: true, required: true },
+  serviceId: { type: mongoose.Schema.Types.ObjectId, ref: 'Service', required: true },
+  startDate: { type: Date, required: true },
+  endDate: { type: Date, required: true },
+  address: { type: String, required: true },
+  totalAmount: { type: Number, required: true },
+  advanceProof: { type: String },
   advanceVerified: { type: Boolean, default: false },
   status: { 
     type: String, 
     enum: ['pending', 'approved', 'advance_paid', 'completed', 'reviewed', 'rejected', 'cancelled'], 
     default: 'pending' 
   },
-  review: { rating: Number, comment: String },
+  review: { 
+    rating: { type: Number }, 
+    comment: { type: String } 
+  },
   createdAt: { type: Date, default: Date.now }
 });
 const Booking = mongoose.models.Booking || mongoose.model('Booking', BookingSchema);
 
 // --- ROUTES ---
 
+// AUTH
 app.post('/api/register', async (req, res) => {
   try {
     const { name, email, mobile, password, role } = req.body;
@@ -105,11 +108,12 @@ app.post('/api/login', async (req, res) => {
   } catch (err) { res.status(500).json({ error: "Server Error during login" }); }
 });
 
+// SERVICES
 app.post('/api/services', async (req, res) => {
   try {
     const { vendorId, category, title, rate, contactNumber } = req.body;
     if (!vendorId || !category || !title || !rate || !contactNumber) {
-      return res.status(400).json({ error: "Missing required service details" });
+      return res.status(400).json({ error: "Missing fields" });
     }
     const newService = new Service(req.body);
     const saved = await newService.save();
@@ -153,12 +157,17 @@ app.get('/api/my-services/:vendorId', async (req, res) => {
   } catch (err) { res.status(500).json({ error: "Fetch error" }); }
 });
 
+// BOOKINGS
 app.post('/api/bookings', async (req, res) => {
   try {
+    const { customerId, vendorId, serviceId, startDate, endDate, address, totalAmount } = req.body;
+    if (!customerId || !vendorId || !serviceId || !startDate || !endDate || !address || !totalAmount) {
+       return res.status(400).json({ error: "Missing booking information" });
+    }
     const booking = new Booking(req.body);
     await booking.save();
     res.status(201).json(booking);
-  } catch (err) { res.status(500).json({ error: "Booking system offline" }); }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/my-bookings/:role/:id', async (req, res) => {

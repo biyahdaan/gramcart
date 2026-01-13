@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Language, User, Translations, UserRole, Translation } from './types';
 import { CATEGORIES, BANNERS } from './constants';
@@ -115,15 +114,9 @@ const App: React.FC = () => {
         let width = img.width;
         let height = img.height;
         const max_dim = 1200; 
-
-        if (width > height) {
-          if (width > max_dim) { height *= max_dim / width; width = max_dim; }
-        } else {
-          if (height > max_dim) { width *= max_dim / height; height = max_dim; }
-        }
-
-        canvas.width = width;
-        canvas.height = height;
+        if (width > height) { if (width > max_dim) { height *= max_dim / width; width = max_dim; } } 
+        else { if (height > max_dim) { width *= max_dim / height; height = max_dim; } }
+        canvas.width = width; canvas.height = height;
         const ctx = canvas.getContext('2d');
         ctx?.drawImage(img, 0, 0, width, height);
         resolve(canvas.toDataURL('image/jpeg', 0.6));
@@ -144,78 +137,43 @@ const App: React.FC = () => {
   const removeImage = (index: number) => setServiceForm(prev => ({ ...prev, images: prev.images.filter((_, i) => i !== index) }));
 
   const deleteService = async (serviceId: string) => {
-    if (!window.confirm("Are you sure you want to delete this service?")) return;
+    if (!window.confirm("Delete this listing?")) return;
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE_URL}/services/${serviceId}`, { method: 'DELETE' });
-      if (res.ok) { fetchMyServices(); fetchData(); } else alert("Delete failed");
-    } catch (e) { alert("Error: Connection lost"); } finally { setLoading(false); }
+      if (res.ok) { fetchMyServices(); fetchData(); } 
+    } catch (e) { alert("Error deleting"); } finally { setLoading(false); }
   };
 
   const handleAddOrUpdateService = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user) return alert("Please login first");
-    
-    setLoading(true);
-    setPublishStatus('Compressing Photos...');
-
+    if (!user) return alert("Please login");
+    setLoading(true); setPublishStatus('Compressing Photos...');
     try {
-      const compressedImages = await Promise.all(
-        serviceForm.images.map(img => img.startsWith('data:image') ? compressImage(img) : img)
-      );
-
-      setPublishStatus('Syncing Vendor Data...');
-      const vendorsRes = await fetch(`${API_BASE_URL}/search`);
-      const allVendors = await vendorsRes.json();
-      const v = allVendors.find((vend: any) => vend.userId === (user._id || user.id));
-      
-      if (!v) throw new Error("Vendor profile missing");
-
-      setPublishStatus('Uploading Service Details...');
-      
-      // CRITICAL FIX: Clean payload to avoid Cast to ObjectId error
+      const compressedImages = await Promise.all(serviceForm.images.map(img => img.startsWith('data:image') ? compressImage(img) : img));
+      setPublishStatus('Syncing Vendor...');
+      const vRes = await fetch(`${API_BASE_URL}/search`);
+      const allV = await vRes.json();
+      const v = allV.find((vend: any) => vend.userId === (user._id || user.id));
+      if (!v) throw new Error("Vendor missing");
+      setPublishStatus('Uploading...');
       const isUpdating = !!serviceForm._id && serviceForm._id.length > 0;
-      const targetId = serviceForm._id;
-
-      // Extract only clean data, excluding empty IDs
       const payload = {
-        title: serviceForm.title,
-        category: serviceForm.category,
-        description: serviceForm.description,
-        rate: Number(serviceForm.rate),
-        unitType: serviceForm.unitType,
-        itemsIncluded: serviceForm.itemsIncluded,
-        images: compressedImages,
-        contactNumber: serviceForm.contactNumber,
-        vendorId: v._id
+        title: serviceForm.title, category: serviceForm.category, description: serviceForm.description,
+        rate: Number(serviceForm.rate), unitType: serviceForm.unitType, itemsIncluded: serviceForm.itemsIncluded,
+        images: compressedImages, contactNumber: serviceForm.contactNumber, vendorId: v._id
       };
-
       const method = isUpdating ? 'PUT' : 'POST';
-      const endpoint = isUpdating ? `/services/${targetId}` : '/services';
-      
-      const res = await fetch(`${API_BASE_URL}${endpoint}`, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
+      const endpoint = isUpdating ? `/services/${serviceForm._id}` : '/services';
+      const res = await fetch(`${API_BASE_URL}${endpoint}`, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (res.ok) {
-        setPublishStatus('Published Successfully!');
+        setPublishStatus('Success!');
         setTimeout(() => {
           setServiceForm({ title: '', category: 'tent', description: '', rate: '', unitType: 'Per Day', itemsIncluded: [], images: [], contactNumber: '', _id: '', customItem: '' });
-          setPublishStatus('');
-          fetchMyServices(); fetchData(); setView('my-services');
-          setLoading(false);
+          setPublishStatus(''); fetchMyServices(); fetchData(); setView('my-services'); setLoading(false);
         }, 1200);
-      } else {
-        const err = await res.json();
-        alert(err.error || "Service upload failed");
-        setLoading(false);
-      }
-    } catch (e) {
-      alert("Error: Database connection lost");
-      setLoading(false);
-    }
+      } else { alert("Upload failed"); setLoading(false); }
+    } catch (e) { alert("Error connecting to server"); setLoading(false); }
   };
 
   const handleAuth = async (e: React.FormEvent) => {
@@ -225,13 +183,8 @@ const App: React.FC = () => {
     const payload = authMode === 'login' 
       ? { identifier: authForm.identifier, password: authForm.password } 
       : { name: authForm.name, email: authForm.email, mobile: authForm.mobile, password: authForm.password, role: authForm.role };
-    
     try {
-      const res = await fetch(`${API_BASE_URL}${endpoint}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      const res = await fetch(`${API_BASE_URL}${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const result = await res.json();
       if (res.ok) {
         localStorage.setItem('gramcart_user', JSON.stringify(result.user));
@@ -242,14 +195,35 @@ const App: React.FC = () => {
     } catch (err) {} finally { setLoading(false); }
   };
 
+  const handleBooking = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !bookingTarget) return;
+    setLoading(true);
+    try {
+        const vRes = await fetch(`${API_BASE_URL}/search`);
+        const allV = await vRes.json();
+        const v = allV.find((vend: any) => vend.services.some((s: any) => s._id === bookingTarget._id));
+        const diff = new Date(bookingForm.endDate).getTime() - new Date(bookingForm.startDate).getTime();
+        const days = Math.max(1, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+        const res = await fetch(`${API_BASE_URL}/bookings`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                ...bookingForm, 
+                customerId: user._id || user.id, 
+                vendorId: v._id, 
+                serviceId: bookingTarget._id, 
+                totalAmount: bookingTarget.rate * days 
+            })
+        });
+        if (res.ok) { setBookingTarget(null); setView('bookings'); fetchBookings(); } else { alert("Booking failed"); }
+    } catch (e) { alert("Server error"); } finally { setLoading(false); }
+  };
+
   const updateBookingStatus = async (bookingId: string, payload: any) => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/bookings/${bookingId}/status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      const res = await fetch(`${API_BASE_URL}/bookings/${bookingId}/status`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (res.ok) fetchBookings();
     } catch (e) {} finally { setLoading(false); }
   };
@@ -265,25 +239,14 @@ const App: React.FC = () => {
   const fetchMyServices = async () => {
     if (!user || user.role !== UserRole.VENDOR) return;
     try {
-      const vendorsRes = await fetch(`${API_BASE_URL}/search`);
-      const allVendors = await vendorsRes.json();
-      const v = allVendors.find((vend: any) => vend.userId === (user._id || user.id));
+      const vRes = await fetch(`${API_BASE_URL}/search`);
+      const allV = await vRes.json();
+      const v = allV.find((vend: any) => vend.userId === (user._id || user.id));
       if (v) {
         const res = await fetch(`${API_BASE_URL}/my-services/${v._id}`);
         if (res.ok) setMyServices(await res.json());
       }
     } catch (e) {}
-  };
-
-  const togglePresetItem = (item: string) => {
-    const exists = serviceForm.itemsIncluded.includes(item);
-    setServiceForm({ ...serviceForm, itemsIncluded: exists ? serviceForm.itemsIncluded.filter(i => i !== item) : [...serviceForm.itemsIncluded, item] });
-  };
-
-  const addCustomItem = () => {
-    if (serviceForm.customItem?.trim()) {
-      setServiceForm({ ...serviceForm, itemsIncluded: [...serviceForm.itemsIncluded, serviceForm.customItem.trim()], customItem: '' });
-    }
   };
 
   const handleAdvanceUpload = (e: React.ChangeEvent<HTMLInputElement>, bookingId: string) => {
@@ -293,13 +256,8 @@ const App: React.FC = () => {
     reader.onloadend = async () => {
       setLoading(true);
       try {
-        await fetch(`${API_BASE_URL}/bookings/${bookingId}/status`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ advanceProof: reader.result, status: 'advance_paid' })
-        });
-        alert("Biyana Screenshot Sent!");
-        fetchBookings();
+        await fetch(`${API_BASE_URL}/bookings/${bookingId}/status`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ advanceProof: reader.result, status: 'advance_paid' }) });
+        alert("Biyana proof uploaded!"); fetchBookings();
       } catch (e) {} finally { setLoading(false); }
     };
     reader.readAsDataURL(file);
@@ -309,23 +267,16 @@ const App: React.FC = () => {
     const steps = ['pending', 'approved', 'advance_paid', 'completed'];
     const currentIndex = steps.indexOf(status);
     return (
-      <div className="flex items-center justify-between w-full mb-10 mt-2 px-2 relative">
-        <div className="absolute top-[14px] left-0 right-0 h-[3px] bg-gray-100 z-0"></div>
-        {steps.map((step, index) => {
-          const isActive = index === currentIndex;
-          const isCompleted = index < currentIndex || status === 'reviewed';
-          return (
-            <div key={step} className="flex flex-col items-center z-10 flex-1 relative">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center transition-all duration-700 border-4 border-white shadow-md ${isCompleted ? 'bg-green-500 text-white' : isActive ? 'bg-[#2874f0] text-white scale-125' : 'bg-gray-200 text-gray-400'} ${isActive ? 'animate-pulse' : ''}`}>
-                {isCompleted ? <i className="fas fa-check text-[10px]"></i> : <span className="text-[10px] font-black">{index + 1}</span>}
-              </div>
-              <span className={`text-[7px] mt-2 font-black uppercase text-center tracking-widest ${isActive ? 'text-[#2874f0]' : isCompleted ? 'text-green-600' : 'text-gray-300'}`}>{step.replace('_', ' ')}</span>
-              {index < steps.length - 1 && (
-                 <div className={`absolute top-[14px] left-[50%] w-full h-[3px] -z-10 transition-all duration-1000 ${index < currentIndex ? 'bg-green-500' : 'bg-gray-100'}`}></div>
-              )}
+      <div className="flex items-center justify-between w-full mb-8 relative">
+        <div className="absolute top-[14px] left-0 right-0 h-[3px] bg-gray-100 -z-10"></div>
+        {steps.map((step, index) => (
+          <div key={step} className="flex flex-col items-center flex-1">
+            <div className={`w-8 h-8 rounded-full border-4 border-white shadow-sm flex items-center justify-center text-[10px] font-black ${index <= currentIndex ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-400'}`}>
+              {index < currentIndex ? <i className="fas fa-check"></i> : index + 1}
             </div>
-          );
-        })}
+            <span className={`text-[7px] mt-2 uppercase font-black ${index <= currentIndex ? 'text-green-600' : 'text-gray-300'}`}>{step.replace('_', ' ')}</span>
+          </div>
+        ))}
       </div>
     );
   };
@@ -334,7 +285,7 @@ const App: React.FC = () => {
     return (
       <div className="max-w-md mx-auto min-h-screen bg-[#2874f0] flex items-center justify-center p-6">
         <div className="bg-white w-full p-8 rounded-2xl shadow-2xl">
-          <div className="text-center mb-8"><h1 className="text-4xl font-black text-[#2874f0] italic">GramCart</h1></div>
+          <div className="text-center mb-8"><h1 className="text-4xl font-black text-[#2874f0] italic tracking-tighter">GramCart</h1></div>
           <form onSubmit={handleAuth} className="space-y-4">
             {authMode === 'register' && (
               <><input placeholder="Name" className="w-full bg-gray-50 p-4 rounded-xl border outline-none" onChange={e => setAuthForm({...authForm, name: e.target.value})} required /><input placeholder="Mobile Number" className="w-full bg-gray-50 p-4 rounded-xl border outline-none" onChange={e => setAuthForm({...authForm, mobile: e.target.value})} required /></>
@@ -362,9 +313,6 @@ const App: React.FC = () => {
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[1000] flex flex-col items-center justify-center p-8">
             <div className="w-24 h-24 border-8 border-white/20 border-t-[#fb641b] rounded-full animate-spin mb-8 shadow-xl"></div>
             <p className="text-white font-black text-2xl uppercase tracking-tighter animate-pulse">{publishStatus}</p>
-            <div className="w-full h-1.5 bg-white/10 rounded-full mt-10 overflow-hidden max-w-[200px]">
-                <div className="h-full bg-[#fb641b] animate-[progress_2s_ease-in-out_infinite]"></div>
-            </div>
         </div>
       )}
 
@@ -374,7 +322,7 @@ const App: React.FC = () => {
           <LanguageSwitch current={lang} onChange={setLang} />
         </div>
         <div className="relative">
-          <input placeholder={Translations[lang].searchPlaceholder} className="w-full bg-white text-gray-800 p-3.5 pl-10 pr-12 rounded-lg text-sm outline-none shadow-inner" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}/>
+          <input placeholder={Translations[lang].searchPlaceholder} className="w-full bg-white text-gray-800 p-3.5 pl-10 pr-12 rounded-lg text-sm outline-none" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}/>
           <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
           <button onClick={startVoiceSearch} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#2874f0] w-8 h-8 flex items-center justify-center bg-gray-50 rounded-full"><i className={`fas fa-microphone ${isListening ? 'text-red-500 animate-pulse' : ''}`}></i></button>
         </div>
@@ -392,17 +340,17 @@ const App: React.FC = () => {
                 ))}
             </div>
             {filteredData.map(vendor => (
-              <div key={vendor._id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mb-4 animate-slideIn">
-                <div className="flex justify-between items-center mb-4"><h4 className="font-black text-gray-800">{vendor.businessName}</h4><span className="text-white bg-green-600 text-[10px] font-black px-2 py-1 rounded">4.5 ★</span></div>
+              <div key={vendor._id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mb-4">
+                <div className="flex justify-between items-center mb-4"><h4 className="font-black text-gray-800 tracking-tight">{vendor.businessName}</h4><span className="text-white bg-green-600 text-[10px] font-black px-2 py-1 rounded">4.5 ★</span></div>
                 <div className="grid grid-cols-2 gap-4">
                   {vendor.services?.map((s: any) => (
-                    <div key={s._id} className="border border-gray-50 p-2 rounded-2xl bg-gray-50/50 hover:bg-white transition-all shadow-sm">
+                    <div key={s._id} className="border border-gray-50 p-2 rounded-2xl bg-gray-50/50">
                         <img src={s.images?.[0] || 'https://via.placeholder.com/150'} className="h-28 w-full object-cover rounded-xl mb-2" />
                         <p className="text-[10px] font-black text-gray-700 truncate">{s.title}</p>
                         <p className="text-[#2874f0] font-black text-sm">₹{s.rate}/-</p>
                         <div className="flex gap-1.5 mt-3">
                            <button onClick={() => setDetailTarget(s)} className="flex-1 bg-white border border-gray-200 text-gray-500 text-[9px] font-bold py-2 rounded-lg">Details</button>
-                           <button onClick={() => { setBookingTarget(s); setBookingForm({ startDate: '', endDate: '', address: '' }); }} className="flex-1 bg-[#fb641b] text-white text-[9px] font-black py-2 rounded-lg active:scale-95 transition-all">Book</button>
+                           <button onClick={() => { setBookingTarget(s); setBookingForm({ startDate: '', endDate: '', address: '' }); }} className="flex-1 bg-[#fb641b] text-white text-[9px] font-black py-2 rounded-lg">Book</button>
                         </div>
                     </div>
                   ))}
@@ -413,69 +361,67 @@ const App: React.FC = () => {
         )}
 
         {view === 'vendor-dashboard' && user?.role === UserRole.VENDOR && (
-          <div className="space-y-6 animate-slideIn">
-            <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-gray-100">
-              <h3 className="text-sm font-black text-[#2874f0] uppercase mb-8 tracking-widest text-center border-b pb-4">
-                 {serviceForm._id ? 'Update Service' : 'Add New Service'}
-              </h3>
+          <div className="space-y-6">
+            <div className="bg-white p-6 rounded-[2.5rem] shadow-sm">
+              <h3 className="text-sm font-black text-[#2874f0] uppercase mb-8 tracking-widest text-center">{serviceForm._id ? 'Update Listing' : 'Publish Service'}</h3>
               <form onSubmit={handleAddOrUpdateService} className="space-y-6">
                 <div className="bg-blue-50/50 p-6 rounded-3xl border border-blue-100">
-                  <p className="text-[10px] font-black text-blue-400 uppercase mb-4 flex justify-between">Photos (Auto-Compressed) <span>{serviceForm.images.length}/5</span></p>
+                  <p className="text-[10px] font-black text-blue-400 uppercase mb-4 flex justify-between">Photos <span>{serviceForm.images.length}/5</span></p>
                   <div className="flex flex-wrap gap-3">
                     {serviceForm.images.map((img, idx) => (
-                      <div key={idx} className="relative w-16 h-16"><img src={img} className="w-full h-full object-cover rounded-xl shadow-md" /><button type="button" onClick={() => removeImage(idx)} className="absolute -top-1 -right-1 bg-red-500 text-white w-5 h-5 rounded-full text-[10px] flex items-center justify-center shadow-lg"><i className="fas fa-times"></i></button></div>
+                      <div key={idx} className="relative w-16 h-16"><img src={img} className="w-full h-full object-cover rounded-xl shadow-md" /><button type="button" onClick={() => removeImage(idx)} className="absolute -top-1 -right-1 bg-red-500 text-white w-5 h-5 rounded-full text-[10px] flex items-center justify-center"><i className="fas fa-times"></i></button></div>
                     ))}
                     {serviceForm.images.length < 5 && (
-                      <button type="button" onClick={() => fileInputRef.current?.click()} className="w-16 h-16 rounded-xl border-2 border-dashed border-blue-200 text-blue-300 flex items-center justify-center bg-white active:scale-95 transition-all"><i className="fas fa-camera text-xl"></i></button>
+                      <button type="button" onClick={() => fileInputRef.current?.click()} className="w-16 h-16 rounded-xl border-2 border-dashed border-blue-200 text-blue-300 flex items-center justify-center bg-white"><i className="fas fa-camera text-xl"></i></button>
                     )}
                   </div>
                   <input type="file" multiple accept="image/*" className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
                 </div>
-                <input placeholder="Service Title (e.g. Wedding Tent)" className="w-full bg-gray-50 p-4 rounded-xl border border-gray-100 text-sm outline-none" value={serviceForm.title} onChange={e => setServiceForm({...serviceForm, title: e.target.value})} required />
+                <input placeholder="Service Title" className="w-full bg-gray-50 p-4 rounded-xl border outline-none" value={serviceForm.title} onChange={e => setServiceForm({...serviceForm, title: e.target.value})} required />
                 <div className="grid grid-cols-2 gap-3">
-                   <select className="bg-gray-50 p-4 rounded-xl border border-gray-100 text-xs font-black text-gray-500" value={serviceForm.category} onChange={e => setServiceForm({...serviceForm, category: e.target.value})}>
+                   <select className="bg-gray-50 p-4 rounded-xl text-xs font-black" value={serviceForm.category} onChange={e => setServiceForm({...serviceForm, category: e.target.value})}>
                      {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                    </select>
-                   <select className="bg-gray-50 p-4 rounded-xl border border-gray-100 text-xs font-black text-gray-500" value={serviceForm.unitType} onChange={e => setServiceForm({...serviceForm, unitType: e.target.value})}>
+                   <select className="bg-gray-50 p-4 rounded-xl text-xs font-black" value={serviceForm.unitType} onChange={e => setServiceForm({...serviceForm, unitType: e.target.value})}>
                      <option>Per Day</option><option>Per Piece</option><option>Per Plate</option>
                    </select>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                   <input placeholder="Price (₹)" type="number" className="bg-gray-50 p-4 rounded-xl border border-gray-100 text-sm" value={serviceForm.rate} onChange={e => setServiceForm({...serviceForm, rate: e.target.value})} required />
-                   <input placeholder="Contact Phone" type="tel" className="bg-gray-50 p-4 rounded-xl border border-gray-100 text-sm" value={serviceForm.contactNumber} onChange={e => setServiceForm({...serviceForm, contactNumber: e.target.value})} required />
+                   <input placeholder="Price (₹)" type="number" className="bg-gray-50 p-4 rounded-xl text-sm" value={serviceForm.rate} onChange={e => setServiceForm({...serviceForm, rate: e.target.value})} required />
+                   <input placeholder="Phone" type="tel" className="bg-gray-50 p-4 rounded-xl text-sm" value={serviceForm.contactNumber} onChange={e => setServiceForm({...serviceForm, contactNumber: e.target.value})} required />
                 </div>
-                <div className="bg-gray-50 p-6 rounded-3xl border border-gray-100">
-                  <p className="text-[10px] font-black text-gray-400 uppercase mb-4 tracking-widest">Service Inventory</p>
-                  <div className="flex flex-wrap gap-2 mb-5">
+                <div className="bg-gray-50 p-6 rounded-3xl">
+                  <p className="text-[10px] font-black text-gray-400 uppercase mb-4">Inventory</p>
+                  <div className="flex flex-wrap gap-2 mb-4">
                     {(PRESETS[serviceForm.category] || []).map(item => (
-                      <button key={item} type="button" onClick={() => togglePresetItem(item)} className={`px-3 py-2 rounded-lg text-[9px] font-black border transition-all ${serviceForm.itemsIncluded.includes(item) ? 'bg-[#2874f0] text-white border-[#2874f0]' : 'bg-white text-gray-400'}`}>{item}</button>
+                      <button key={item} type="button" onClick={() => {
+                        const exists = serviceForm.itemsIncluded.includes(item);
+                        setServiceForm({ ...serviceForm, itemsIncluded: exists ? serviceForm.itemsIncluded.filter(i => i !== item) : [...serviceForm.itemsIncluded, item] });
+                      }} className={`px-3 py-2 rounded-lg text-[9px] font-black border ${serviceForm.itemsIncluded.includes(item) ? 'bg-[#2874f0] text-white' : 'bg-white text-gray-400'}`}>{item}</button>
                     ))}
                   </div>
-                  <div className="flex gap-2">
-                    <input placeholder="Add other..." className="flex-1 bg-white p-3 rounded-xl text-xs border border-gray-100" value={serviceForm.customItem || ''} onChange={e => setServiceForm({...serviceForm, customItem: e.target.value})} />
-                    <button type="button" onClick={addCustomItem} className="bg-[#2874f0] text-white px-5 py-2 rounded-xl text-xs font-black">ADD</button>
-                  </div>
+                  <div className="flex gap-2"><input placeholder="Add other..." className="flex-1 bg-white p-3 rounded-xl text-xs" value={serviceForm.customItem || ''} onChange={e => setServiceForm({...serviceForm, customItem: e.target.value})} /><button type="button" onClick={() => { if(serviceForm.customItem) setServiceForm({...serviceForm, itemsIncluded: [...serviceForm.itemsIncluded, serviceForm.customItem], customItem: ''})} } className="bg-[#2874f0] text-white px-5 py-2 rounded-xl text-xs">ADD</button></div>
                 </div>
-                <textarea placeholder="Service Details..." className="w-full bg-gray-50 p-4 rounded-xl border border-gray-100 text-sm h-32 outline-none" value={serviceForm.description} onChange={e => setServiceForm({...serviceForm, description: e.target.value})} />
-                <button type="submit" className="w-full bg-[#fb641b] text-white py-5 rounded-2xl font-black uppercase text-xs shadow-xl active:scale-95 transition-all">Publish Live</button>
+                <textarea placeholder="Description" className="w-full bg-gray-50 p-4 rounded-xl text-sm h-32 outline-none" value={serviceForm.description} onChange={e => setServiceForm({...serviceForm, description: e.target.value})} />
+                <button type="submit" className="w-full bg-[#fb641b] text-white py-5 rounded-2xl font-black uppercase text-xs shadow-xl tracking-widest">Publish Live</button>
               </form>
             </div>
           </div>
         )}
 
         {view === 'my-services' && (
-          <div className="space-y-4 animate-slideIn">
-             <h2 className="text-lg font-black text-gray-800 mb-6 px-2 tracking-widest uppercase text-xs">My Storefront</h2>
+          <div className="space-y-4">
+             <h2 className="text-lg font-black text-gray-800 mb-6 uppercase tracking-widest text-xs border-l-4 border-[#2874f0] pl-4">My Storefront</h2>
              {myServices.map(s => (
                <div key={s._id} className="bg-white p-5 rounded-3xl shadow-sm flex items-center gap-5 border border-gray-50">
-                  <img src={s.images?.[0] || 'https://via.placeholder.com/150'} className="w-20 h-20 rounded-2xl object-cover shadow-sm" />
+                  <img src={s.images?.[0] || 'https://via.placeholder.com/150'} className="w-20 h-20 rounded-2xl object-cover" />
                   <div className="flex-1">
-                      <p className="font-black text-gray-800 text-[12px] uppercase truncate tracking-tight">{s.title}</p>
+                      <p className="font-black text-gray-800 text-[12px] uppercase truncate w-32 tracking-tight">{s.title}</p>
                       <p className="text-[#2874f0] text-[10px] font-black mt-1">₹{s.rate} / {s.unitType}</p>
                   </div>
                   <div className="flex flex-col gap-2">
-                    <button onClick={() => deleteService(s._id)} className="w-9 h-9 rounded-xl bg-red-50 text-red-500 flex items-center justify-center"><i className="fas fa-trash text-xs"></i></button>
-                    <button onClick={() => { setServiceForm({ ...s, images: s.images || [], itemsIncluded: s.itemsIncluded || [], customItem: '' }); setView('vendor-dashboard'); }} className="w-9 h-9 rounded-xl bg-blue-50 text-blue-500 flex items-center justify-center"><i className="fas fa-edit text-xs"></i></button>
+                    <button onClick={() => deleteService(s._id)} className="w-9 h-9 rounded-xl bg-red-50 text-red-500 flex items-center justify-center shadow-sm"><i className="fas fa-trash text-xs"></i></button>
+                    <button onClick={() => { setServiceForm({ ...s, customItem: '' }); setView('vendor-dashboard'); }} className="w-9 h-9 rounded-xl bg-blue-50 text-blue-500 flex items-center justify-center shadow-sm"><i className="fas fa-edit text-xs"></i></button>
                   </div>
                </div>
              ))}
@@ -484,30 +430,28 @@ const App: React.FC = () => {
 
         {view === 'bookings' && (
           <div className="space-y-6">
-             <h2 className="text-lg font-black text-gray-800 border-l-4 border-[#fb641b] pl-3 mb-4">Orders & Status</h2>
+             <h2 className="text-lg font-black text-gray-800 border-l-4 border-[#fb641b] pl-3 mb-4">Orders Sync</h2>
              {bookings.map(b => (
-               <div key={b._id} className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-50 animate-slideIn mb-4">
+               <div key={b._id} className="bg-white p-6 rounded-[2rem] shadow-sm mb-4">
                  <div className="flex justify-between items-start mb-6">
                     <div>
                         <p className="text-[9px] font-black text-[#2874f0] uppercase tracking-widest mb-1">{b.serviceId?.title}</p>
-                        <h4 className="font-black text-gray-800 text-lg leading-tight">{user?.role === UserRole.VENDOR ? b.customerId?.name : b.vendorId?.businessName}</h4>
+                        <h4 className="font-black text-gray-800 text-lg">{user?.role === UserRole.VENDOR ? b.customerId?.name : b.vendorId?.businessName}</h4>
                     </div>
                     <span className="text-[8px] font-black uppercase px-3 py-1.5 rounded-full bg-blue-50 text-blue-600">{b.status}</span>
                  </div>
                  <Stepper status={b.status} />
-                 <div className="bg-gray-50 p-4 rounded-2xl text-[10px] font-bold text-gray-600 space-y-2">
+                 <div className="bg-gray-50 p-4 rounded-2xl text-[10px] font-bold text-gray-600">
                     <div className="flex justify-between"><span>Date:</span><span>{new Date(b.startDate).toDateString()}</span></div>
-                    <div className="flex justify-between border-t pt-2 mt-2"><span>Bill Total:</span><span className="text-gray-800">₹{b.totalAmount}</span></div>
+                    <div className="flex justify-between mt-2"><span>Total Bill:</span><span className="text-gray-800 font-black">₹{b.totalAmount}</span></div>
                  </div>
-
                  {user?.role === UserRole.USER && b.status === 'approved' && (
                     <div className="mt-4 p-4 bg-blue-50 rounded-2xl border-2 border-dashed border-blue-200 text-center">
-                        <p className="text-[10px] font-black text-blue-800 uppercase mb-3">Pay Biyana (Advance) to UPI: {b.vendorId?.upiId}</p>
+                        <p className="text-[10px] font-black text-blue-800 uppercase mb-3">UPI: {b.vendorId?.upiId} (Biyana: ₹{Math.round(b.totalAmount * 0.1)})</p>
                         <input type="file" className="hidden" ref={proofInputRef} onChange={(e) => handleAdvanceUpload(e, b._id)} />
-                        <button onClick={() => proofInputRef.current?.click()} className="w-full bg-[#2874f0] text-white py-3 rounded-xl text-[10px] font-black uppercase">Upload Screenshot</button>
+                        <button onClick={() => proofInputRef.current?.click()} className="w-full bg-[#2874f0] text-white py-3 rounded-xl text-[10px] font-black uppercase">Upload Payment Screenshot</button>
                     </div>
                  )}
-
                  {user?.role === UserRole.VENDOR && b.status === 'pending' && (
                     <div className="flex gap-3 mt-4">
                       <button onClick={() => updateBookingStatus(b._id, { status: 'approved' })} className="flex-1 bg-green-500 text-white py-3 rounded-xl text-[10px] font-black uppercase">Approve</button>
@@ -520,9 +464,10 @@ const App: React.FC = () => {
         )}
       </main>
 
+      {/* FOOTER NAV */}
       <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white h-24 flex items-center justify-around shadow-2xl z-[150] rounded-t-[3rem] px-8 border-t border-gray-50">
         <button onClick={() => setView('home')} className={`flex flex-col items-center gap-2 ${view === 'home' ? 'text-[#2874f0] scale-110' : 'text-gray-300'}`}><i className="fas fa-home text-xl"></i><span className="text-[8px] font-black uppercase">Home</span></button>
-        <button onClick={() => setView('bookings')} className={`flex flex-col items-center gap-2 ${view === 'bookings' ? 'text-[#2874f0] scale-110' : 'text-gray-300'}`}><i className="fas fa-calendar text-xl"></i><span className="text-[8px] font-black uppercase">Bookings</span></button>
+        <button onClick={() => { setView('bookings'); fetchBookings(); }} className={`flex flex-col items-center gap-2 ${view === 'bookings' ? 'text-[#2874f0] scale-110' : 'text-gray-300'}`}><i className="fas fa-calendar text-xl"></i><span className="text-[8px] font-black uppercase">Orders</span></button>
         {user?.role === UserRole.VENDOR && (
           <>
             <button onClick={() => setView('my-services')} className={`flex flex-col items-center gap-2 ${view === 'my-services' ? 'text-[#2874f0] scale-110' : 'text-gray-300'}`}><i className="fas fa-store text-xl"></i><span className="text-[8px] font-black uppercase">Store</span></button>
@@ -532,24 +477,63 @@ const App: React.FC = () => {
         <button onClick={() => { localStorage.clear(); setUser(null); }} className="text-red-200"><i className="fas fa-power-off text-xl"></i></button>
       </nav>
 
+      {/* DETAIL MODAL */}
+      {detailTarget && (
+        <div className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center p-4 backdrop-blur-sm overflow-y-auto">
+           <div className="bg-white w-full rounded-[2.5rem] p-6 animate-slideUp max-h-[90vh] overflow-y-auto">
+              <div className="flex justify-between items-center mb-6">
+                 <h2 className="text-xl font-black text-gray-800 tracking-tight">{detailTarget.title}</h2>
+                 <button onClick={() => setDetailTarget(null)} className="text-gray-300 hover:text-red-500"><i className="fas fa-times-circle text-2xl"></i></button>
+              </div>
+              <div className="flex gap-2 overflow-x-auto no-scrollbar mb-6">
+                 {(detailTarget.images || []).map((img: string, i: number) => (
+                    <img key={i} src={img} className="h-48 w-64 object-cover rounded-2xl flex-shrink-0 shadow-sm" />
+                 ))}
+              </div>
+              <div className="space-y-6">
+                 <div className="bg-blue-50 p-4 rounded-2xl">
+                    <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-2">Description</p>
+                    <p className="text-sm text-gray-700 font-medium leading-relaxed">{detailTarget.description}</p>
+                 </div>
+                 <div className="bg-gray-50 p-4 rounded-2xl">
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-4">Inventory List</p>
+                    <div className="flex flex-wrap gap-2">
+                       {(detailTarget.itemsIncluded || []).map((item: string, i: number) => (
+                          <span key={i} className="bg-white border px-3 py-1.5 rounded-lg text-[10px] font-black text-gray-600 shadow-sm flex items-center gap-2"><i className="fas fa-check text-green-500"></i> {item}</span>
+                       ))}
+                    </div>
+                 </div>
+                 <div className="flex gap-4">
+                    <div className="flex-1 bg-gray-50 p-4 rounded-2xl">
+                       <p className="text-[9px] font-black text-gray-400 uppercase mb-1">Rate</p>
+                       <p className="text-lg font-black text-[#2874f0]">₹{detailTarget.rate}/-</p>
+                    </div>
+                    <button onClick={() => { setBookingTarget(detailTarget); setDetailTarget(null); }} className="flex-[2] bg-[#fb641b] text-white rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-all">Book Service Now</button>
+                 </div>
+              </div>
+           </div>
+        </div>
+      )}
+
+      {/* BOOKING MODAL */}
       {bookingTarget && (
         <div className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center p-6 backdrop-blur-sm">
            <div className="bg-white w-full rounded-[2.5rem] p-8 animate-slideUp">
-              <h2 className="text-lg font-black text-gray-800 mb-6 uppercase tracking-tight">Booking Request</h2>
-              <form onSubmit={(e) => { e.preventDefault(); /* ... handleBooking logic ... */ }} className="space-y-4">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-lg font-black text-gray-800 uppercase tracking-tight">Booking Request</h2>
+                <button onClick={() => setBookingTarget(null)} className="text-gray-300"><i className="fas fa-times"></i></button>
+              </div>
+              <form onSubmit={handleBooking} className="space-y-4">
                  <div className="bg-gray-50 p-4 rounded-2xl">
-                    <p className="text-[10px] font-black text-gray-400 uppercase mb-2">Service Selected</p>
+                    <p className="text-[10px] font-black text-gray-400 uppercase mb-2">Service</p>
                     <p className="font-black text-gray-800">{bookingTarget.title}</p>
                  </div>
                  <div className="grid grid-cols-2 gap-3">
-                    <input type="date" className="bg-gray-50 p-4 rounded-xl text-xs font-bold" required />
-                    <input type="date" className="bg-gray-50 p-4 rounded-xl text-xs font-bold" required />
+                    <div className="space-y-1"><p className="text-[8px] font-black text-gray-400 uppercase ml-1">From Date</p><input type="date" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-bold" required onChange={e => setBookingForm({...bookingForm, startDate: e.target.value})} /></div>
+                    <div className="space-y-1"><p className="text-[8px] font-black text-gray-400 uppercase ml-1">To Date</p><input type="date" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-bold" required onChange={e => setBookingForm({...bookingForm, endDate: e.target.value})} /></div>
                  </div>
-                 <textarea placeholder="Delivery Location (Village/Address)" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-bold h-24" required />
-                 <div className="flex gap-3">
-                    <button type="button" onClick={() => setBookingTarget(null)} className="flex-1 bg-gray-100 text-gray-400 py-4 rounded-xl text-xs font-black uppercase">Cancel</button>
-                    <button type="submit" className="flex-1 bg-[#fb641b] text-white py-4 rounded-xl text-xs font-black uppercase">Confirm Request</button>
-                 </div>
+                 <textarea placeholder="Service Address (Village/Gully)" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-bold h-24 outline-none" required onChange={e => setBookingForm({...bookingForm, address: e.target.value})} />
+                 <button type="submit" className="w-full bg-[#fb641b] text-white py-5 rounded-2xl font-black uppercase text-xs shadow-xl tracking-widest active:scale-95 transition-all">Submit Booking Request</button>
               </form>
            </div>
         </div>
@@ -558,8 +542,6 @@ const App: React.FC = () => {
       <style>{`
         @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
         .animate-slideUp { animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1); }
-        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
-        .animate-slideIn { animation: slideIn 0.5s ease-out; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         @keyframes progress { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
       `}</style>
