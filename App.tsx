@@ -126,11 +126,10 @@ const AdminDashboard = ({ adminSettings, setAdminSettings, updateBookingStatus }
 };
 
 const App: React.FC = () => {
-  // --- MODULAR UPDATE: NEW STATES ---
+  // ADDED: Splash and Custom Category states
   const [showSplash, setShowSplash] = useState(true);
   const [isOtherCategory, setIsOtherCategory] = useState(false);
 
-  // --- States ---
   const [lang, setLang] = useState<Language>(Language.EN);
   const [user, setUser] = useState<User | null>(null);
   const [vendorProfile, setVendorProfile] = useState<any>(null);
@@ -171,7 +170,7 @@ const App: React.FC = () => {
   const proofInputRef = useRef<HTMLInputElement>(null);
   const finalProofInputRef = useRef<HTMLInputElement>(null);
 
-  // --- MODULAR UPDATE: SPLASH EFFECT ---
+  // ADDED: Splash timer
   useEffect(() => {
     const timer = setTimeout(() => setShowSplash(false), 3000);
     return () => clearTimeout(timer);
@@ -342,7 +341,7 @@ const App: React.FC = () => {
   const handleAddOrUpdateService = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // --- COMPULSORY VALIDATION ---
+    // ADDED: Compulsory validation
     if (!serviceForm.contactNumber || serviceForm.contactNumber.length < 10) {
         alert("❌ COMPULSORY: Please add a valid 10-digit mobile number to list this service.");
         return;
@@ -514,7 +513,7 @@ const App: React.FC = () => {
   return (
     <div className="max-w-md mx-auto min-h-screen bg-[#f1f3f6] pb-24 relative overflow-x-hidden">
       
-      {/* MODULAR UPDATE: SPLASH SCREEN UI */}
+      {/* ADDED: Splash screen UI */}
       {showSplash && (
         <div className="fixed inset-0 bg-gradient-to-br from-[#2874f0] to-[#1e5bb8] z-[9999] flex flex-col items-center justify-center animate-pulse">
             <div className="text-center animate-bounce">
@@ -685,7 +684,6 @@ const App: React.FC = () => {
                         </div>
                      </div>
                      
-                     {/* MODULAR UPDATE: UPDATED FORM WITH DYNAMIC CATEGORY AND COMPULSORY MOBILE */}
                      <input 
                         placeholder="Service Title (e.g. Royal Buffet)" 
                         className="w-full bg-gray-50 p-4 rounded-xl font-bold" 
@@ -694,6 +692,7 @@ const App: React.FC = () => {
                         required 
                      />
                      
+                     {/* ADDED: Dynamic category select with "Other" */}
                      <div className="grid grid-cols-2 gap-4">
                         <select 
                             className="w-full bg-gray-50 p-4 rounded-xl font-bold text-xs" 
@@ -718,7 +717,7 @@ const App: React.FC = () => {
 
                      {isOtherCategory && (
                         <input 
-                            placeholder="Enter Custom Category Name (e.g. Drone Photography)" 
+                            placeholder="Enter Custom Category Name" 
                             className="w-full bg-blue-50 p-4 rounded-xl font-black text-xs border border-blue-200 animate-slideIn"
                             value={serviceForm.category}
                             onChange={e => setServiceForm({...serviceForm, category: e.target.value})}
@@ -726,6 +725,7 @@ const App: React.FC = () => {
                         />
                      )}
 
+                     {/* ADDED: Compulsory Mobile Field */}
                      <div className="space-y-1">
                         <p className="text-[9px] font-black text-red-500 uppercase ml-2">Contact Number (Compulsory)*</p>
                         <input 
@@ -788,22 +788,14 @@ const App: React.FC = () => {
 
                      <textarea placeholder="Description..." className="w-full bg-gray-50 p-5 rounded-xl h-24 text-xs font-bold" value={serviceForm.description} onChange={e => setServiceForm({...serviceForm, description: e.target.value})} />
                      
-                     {/* UPDATED BUTTON WITH LOADING STATE */}
                      <button 
                         type="submit" 
                         disabled={loading}
                         className={`w-full py-5 rounded-2xl font-black uppercase tracking-widest shadow-xl transition-all active:scale-95 ${
-                            loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#fb641b] text-white hover:bg-[#e65a16]'
+                            loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#fb641b] text-white'
                         }`}
                      >
-                        {loading ? (
-                            <span className="flex items-center justify-center gap-2">
-                                <i className="fas fa-circle-notch animate-spin"></i>
-                                {publishStatus || 'Processing...'}
-                            </span>
-                        ) : (
-                            serviceForm._id ? 'Update Service' : 'Go Live Now'
-                        )}
+                        {loading ? 'Syncing...' : (serviceForm._id ? 'Update Service' : 'Go Live Now')}
                      </button>
                   </form>
                </div>
