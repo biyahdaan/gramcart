@@ -6,9 +6,10 @@ import { LanguageSwitch } from './components/LanguageSwitch';
 
 const API_BASE_URL = "https://biyahdaan.onrender.com/api"; 
 
-// --- 2. ADMIN DASHBOARD COMPONENT (Updated with Global Controls) ---
+// --- 2. ADMIN DASHBOARD COMPONENT (Updated with Global Controls & Verification UI) ---
 const AdminDashboard = ({ adminSettings, setAdminSettings, updateBookingStatus }: { adminSettings: any, setAdminSettings: any, updateBookingStatus: any }) => {
     const [adminData, setAdminData] = useState<any>(null);
+    const [viewProof, setViewProof] = useState<string | null>(null);
 
     const fetchAdminData = async () => {
         try {
@@ -55,21 +56,22 @@ const AdminDashboard = ({ adminSettings, setAdminSettings, updateBookingStatus }
                         <thead className="bg-gray-100 text-[8px] font-black uppercase text-gray-400">
                             <tr>
                                 <th className="p-4">Customer</th>
-                                <th className="p-4">Service/Vendor</th>
+                                <th className="p-4">Details</th>
                                 <th className="p-4">Status</th>
-                                <th className="p-4">Control</th>
+                                <th className="p-4">Action</th>
                             </tr>
                         </thead>
                         <tbody className="text-[10px] font-bold">
                             {adminData.bookings?.map((b: any) => (
-                                <tr key={b._id} className="border-b">
+                                <tr key={b._id} className="border-b hover:bg-gray-50/50">
                                     <td className="p-4">
-                                        {b.customerId?.name}
+                                        <div className="font-black">{b.customerId?.name}</div>
                                         <div className="text-[8px] text-gray-400">{b.customerId?.mobile}</div>
                                     </td>
                                     <td className="p-4">
-                                        {b.serviceId?.title}
-                                        <div className="text-[8px] text-blue-500 font-black">{b.vendorId?.businessName}</div>
+                                        <div className="text-[9px] font-black truncate w-24">{b.serviceId?.title}</div>
+                                        <div className="text-[8px] text-blue-500 font-bold">{b.address}, {b.pincode}</div>
+                                        <div className="text-[8px] text-gray-900 font-black">Price: ₹{b.totalAmount}</div>
                                     </td>
                                     <td className="p-4">
                                         <span className={`px-2 py-0.5 rounded uppercase text-[7px] ${b.status === 'completed' ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>{b.status}</span>
@@ -77,9 +79,12 @@ const AdminDashboard = ({ adminSettings, setAdminSettings, updateBookingStatus }
                                     <td className="p-4">
                                         <div className="flex gap-2">
                                             {b.status === 'awaiting_final_verification' && (
-                                                <button onClick={async () => { await updateBookingStatus(b._id, {status: 'final_paid'}); fetchAdminData(); }} className="bg-orange-500 text-white p-1.5 rounded"><i className="fas fa-check text-[8px]"></i></button>
+                                                <>
+                                                  <button onClick={() => setViewProof(b.finalProof)} className="bg-blue-500 text-white p-2 rounded-lg shadow-sm" title="View Proof"><i className="fas fa-eye text-[10px]"></i></button>
+                                                  <button onClick={async () => { if(window.confirm("Approve Final Payment? This will unlock the OTP for customer.")) { await updateBookingStatus(b._id, {status: 'final_paid'}); fetchAdminData(); } }} className="bg-green-600 text-white p-2 rounded-lg shadow-sm" title="Approve Payment"><i className="fas fa-check text-[10px]"></i></button>
+                                                </>
                                             )}
-                                            <button onClick={async () => { if(window.confirm("Cancel this booking?")) { await updateBookingStatus(b._id, {status: 'cancelled'}); fetchAdminData(); } }} className="bg-red-500 text-white p-1.5 rounded"><i className="fas fa-times text-[8px]"></i></button>
+                                            <button onClick={async () => { if(window.confirm("Cancel this booking?")) { await updateBookingStatus(b._id, {status: 'cancelled'}); fetchAdminData(); } }} className="bg-red-400 text-white p-2 rounded-lg shadow-sm" title="Cancel Booking"><i className="fas fa-times text-[10px]"></i></button>
                                         </div>
                                     </td>
                                 </tr>
@@ -88,6 +93,16 @@ const AdminDashboard = ({ adminSettings, setAdminSettings, updateBookingStatus }
                     </table>
                 </div>
             </div>
+
+            {/* Final Screenshot Proof Modal */}
+            {viewProof && (
+                <div className="fixed inset-0 bg-black/90 z-[999] flex items-center justify-center p-6 backdrop-blur-md" onClick={() => setViewProof(null)}>
+                    <div className="relative max-w-sm w-full animate-slideUp">
+                        <img src={viewProof} className="w-full rounded-[2rem] shadow-2xl border-4 border-white" />
+                        <p className="text-white text-center mt-4 font-black text-xs uppercase tracking-widest">Tap anywhere to close</p>
+                    </div>
+                </div>
+            )}
 
             <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-gray-100">
                 <h3 className="text-[10px] font-black uppercase mb-4 tracking-widest text-gray-400">Live Services</h3>
@@ -725,9 +740,9 @@ const App: React.FC = () => {
                                         </>
                                       )}
                                       {b.status === 'final_paid' && (
-                                          <div className="bg-green-50 p-4 rounded-2xl text-center border-2 border-dashed border-green-200">
-                                              <p className="text-[9px] font-black text-green-700 uppercase mb-2">Service Delivery OTP</p>
-                                              <h3 className="text-3xl font-black text-green-600 tracking-[0.5rem]">{b.otp}</h3>
+                                          <div className="bg-green-50 p-6 rounded-3xl text-center border-2 border-dashed border-green-200 animate-bounce">
+                                              <p className="text-[10px] font-black text-green-700 uppercase mb-2">Payment Approved! Share OTP with Vendor</p>
+                                              <h3 className="text-4xl font-black text-green-600 tracking-[0.8rem] ml-3">{b.otp}</h3>
                                           </div>
                                       )}
                                       {b.status === 'completed' && !b.review?.rating && (
@@ -750,12 +765,12 @@ const App: React.FC = () => {
                                     
                                     {b.status === 'awaiting_final_verification' && (
                                         <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 text-center">
-                                            <p className="text-[10px] font-black text-orange-600 uppercase animate-pulse">Waiting for Admin to Verify Final Payment</p>
+                                            <p className="text-[10px] font-black text-orange-600 uppercase">Wait! Final Proof under Admin Review</p>
                                         </div>
                                     )}
 
                                     {b.status === 'final_paid' && (
-                                        <button onClick={() => setOtpTarget({ id: b._id, code: '', correctCode: b.otp })} className="w-full bg-green-600 text-white py-4 rounded-xl text-[10px] font-black uppercase shadow-lg">Enter Delivery OTP</button>
+                                        <button onClick={() => setOtpTarget({ id: b._id, code: '', correctCode: b.otp })} className="w-full bg-green-600 text-white py-4 rounded-xl text-[10px] font-black uppercase shadow-lg">Verify Completion OTP</button>
                                     )}
                                   </>
                               )}
@@ -889,6 +904,8 @@ const App: React.FC = () => {
         @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
         .animate-slideUp { animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1); }
         .no-scrollbar::-webkit-scrollbar { display: none; }
+        .animate-slideIn { animation: slideIn 0.4s ease-out; }
+        @keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
       `}</style>
     </div>
   );
