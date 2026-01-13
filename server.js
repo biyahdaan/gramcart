@@ -18,10 +18,19 @@ const UserSchema = new mongoose.Schema({
   email: { type: String, unique: true, sparse: true, index: true },
   mobile: { type: String, unique: true, required: true, index: true },
   password: { type: String, required: true },
-  role: { type: String, enum: ['user', 'vendor'], default: 'user' },
+  role: { type: String, enum: ['user', 'vendor', 'admin'], default: 'user' },
   location: { lat: Number, lng: Number }
 });
 const User = mongoose.models.User || mongoose.model('User', UserSchema);
+
+// --- 3. DATABASE SCHEMA UPDATE: ADMIN SETTINGS ---
+const AdminSettingsSchema = new mongoose.Schema({
+  adminID: { type: String, default: 'admin' },
+  password: { type: String, default: '123456' },
+  adminUPI: { type: String, default: 'admin@okaxis' },
+  secretKey: { type: String, default: 'ADMIN786' }
+});
+const AdminSettings = mongoose.models.AdminSettings || mongoose.model('AdminSettings', AdminSettingsSchema);
 
 const VendorSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', unique: true },
@@ -62,6 +71,7 @@ const BookingSchema = new mongoose.Schema({
   finalProof: String,
   otp: { type: String, required: true }, 
   status: { type: String, default: 'pending' },
+  isVerified: { type: Boolean, default: false }, // --- 3. DATABASE SCHEMA UPDATE ---
   review: { rating: Number, comment: String },
   createdAt: { type: Date, default: Date.now }
 });
@@ -184,6 +194,29 @@ app.patch('/api/vendors/:id', async (req, res) => {
         const vendor = await Vendor.findByIdAndUpdate(req.params.id, { upiId: req.body.upiId }, { new: true });
         res.json(vendor);
     } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// --- 2. HIDDEN ADMIN LOGIC: SETTINGS FETCH ---
+app.get('/api/admin/settings', async (req, res) => {
+  let settings = await AdminSettings.findOne();
+  if (!settings) settings = await AdminSettings.create({});
+  res.json(settings);
+});
+
+// --- 2. HIDDEN ADMIN LOGIC: SETTINGS UPDATE ---
+app.patch('/api/admin/settings', async (req, res) => {
+  const settings = await AdminSettings.findOneAndUpdate({}, req.body, { new: true });
+  res.json(settings);
+});
+
+// --- 2. HIDDEN ADMIN LOGIC: SYSTEM DATA AGGREGATION ---
+app.get('/api/admin/all-data', async (req, res) => {
+  try {
+      const users = await User.find().lean();
+      const bookings = await Booking.find().populate('serviceId vendorId customerId').sort({ createdAt: -1 }).lean();
+      const services = await Service.find().populate('vendorId').lean();
+      res.json({ users, bookings, services });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.listen(5000, () => console.log('🚀 Server active on 5000'));

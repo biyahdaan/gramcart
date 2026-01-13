@@ -6,7 +6,8 @@ export enum Language {
 
 export enum UserRole {
   USER = 'user',
-  VENDOR = 'vendor'
+  VENDOR = 'vendor',
+  ADMIN = 'admin'
 }
 
 export interface User {
