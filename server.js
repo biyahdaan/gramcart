@@ -23,12 +23,13 @@ const UserSchema = new mongoose.Schema({
 });
 const User = mongoose.models.User || mongoose.model('User', UserSchema);
 
-// --- 3. DATABASE SCHEMA UPDATE: ADMIN SETTINGS ---
+// --- MASTER ADMIN SETTINGS ---
 const AdminSettingsSchema = new mongoose.Schema({
   adminID: { type: String, default: 'admin' },
-  password: { type: String, default: '123456' },
+  password: { type: String, default: '123' },
   adminUPI: { type: String, default: 'admin@okaxis' },
-  secretKey: { type: String, default: 'ADMIN786' }
+  adminWhatsApp: { type: String, default: '910000000000' },
+  secretKey: { type: String, default: 'SUPERADMIN' }
 });
 const AdminSettings = mongoose.models.AdminSettings || mongoose.model('AdminSettings', AdminSettingsSchema);
 
@@ -71,7 +72,7 @@ const BookingSchema = new mongoose.Schema({
   finalProof: String,
   otp: { type: String, required: true }, 
   status: { type: String, default: 'pending' },
-  isVerified: { type: Boolean, default: false }, // --- 3. DATABASE SCHEMA UPDATE ---
+  isVerified: { type: Boolean, default: false },
   review: { rating: Number, comment: String },
   createdAt: { type: Date, default: Date.now }
 });
@@ -168,7 +169,6 @@ app.patch('/api/bookings/:id/status', async (req, res) => {
     const { status } = req.body;
     const booking = await Booking.findByIdAndUpdate(req.params.id, req.body, { new: true });
 
-    // NEW LOGIC: Automatic Date Blocking on Approval
     if (status === 'approved') {
         const startDate = new Date(booking.startDate);
         const endDate = new Date(booking.endDate);
@@ -188,7 +188,6 @@ app.patch('/api/bookings/:id/status', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// NEW ROUTE: Update Vendor Payout Info (UPI)
 app.patch('/api/vendors/:id', async (req, res) => {
     try {
         const vendor = await Vendor.findByIdAndUpdate(req.params.id, { upiId: req.body.upiId }, { new: true });
@@ -196,20 +195,17 @@ app.patch('/api/vendors/:id', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// --- 2. HIDDEN ADMIN LOGIC: SETTINGS FETCH ---
 app.get('/api/admin/settings', async (req, res) => {
   let settings = await AdminSettings.findOne();
   if (!settings) settings = await AdminSettings.create({});
   res.json(settings);
 });
 
-// --- 2. HIDDEN ADMIN LOGIC: SETTINGS UPDATE ---
 app.patch('/api/admin/settings', async (req, res) => {
   const settings = await AdminSettings.findOneAndUpdate({}, req.body, { new: true });
   res.json(settings);
 });
 
-// --- 2. HIDDEN ADMIN LOGIC: SYSTEM DATA AGGREGATION ---
 app.get('/api/admin/all-data', async (req, res) => {
   try {
       const users = await User.find().lean();
@@ -219,4 +215,4 @@ app.get('/api/admin/all-data', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.listen(5000, () => console.log('🚀 Server active on 5000'));
+app.listen(5000, () => console.log('🚀 Master Server active on 5000'));

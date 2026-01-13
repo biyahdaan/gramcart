@@ -6,8 +6,8 @@ import { LanguageSwitch } from './components/LanguageSwitch';
 
 const API_BASE_URL = "https://biyahdaan.onrender.com/api"; 
 
-// --- 2. ADMIN DASHBOARD COMPONENT ---
-const AdminDashboard = ({ adminSettings, setAdminSettings }: { adminSettings: any, setAdminSettings: any }) => {
+// --- 2. ADMIN DASHBOARD COMPONENT (Updated with Global Controls) ---
+const AdminDashboard = ({ adminSettings, setAdminSettings, updateBookingStatus }: { adminSettings: any, setAdminSettings: any, updateBookingStatus: any }) => {
     const [adminData, setAdminData] = useState<any>(null);
 
     const fetchAdminData = async () => {
@@ -28,29 +28,64 @@ const AdminDashboard = ({ adminSettings, setAdminSettings }: { adminSettings: an
         alert("System Settings Updated Successfully!");
     };
 
-    if (!adminData) return <div className="p-10 text-center font-black animate-pulse">CONNECTING TO SYSTEM CORE...</div>;
+    if (!adminData) return <div className="p-10 text-center font-black animate-pulse text-blue-600">ACCESSING MASTER DATABASE...</div>;
 
     return (
         <div className="p-4 space-y-6 pb-32 animate-slideIn">
             <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border-2 border-blue-50">
-                <h3 className="text-[10px] font-black uppercase mb-4 text-gray-400 tracking-widest">Global Payout Config</h3>
+                <h3 className="text-[10px] font-black uppercase mb-4 text-gray-400 tracking-widest">Global Payout & Support Config</h3>
                 <div className="space-y-3">
                     <p className="text-[9px] font-black text-gray-400 uppercase ml-1">Admin UPI (For 90% Final Payments)</p>
                     <input className="w-full bg-gray-50 p-4 rounded-xl text-xs font-bold" value={adminSettings?.adminUPI} onChange={e => setAdminSettings({...adminSettings, adminUPI: e.target.value})} placeholder="Admin UPI ID" />
+                    <p className="text-[9px] font-black text-gray-400 uppercase ml-1">Admin WhatsApp Support (With Country Code)</p>
+                    <input className="w-full bg-gray-50 p-4 rounded-xl text-xs font-bold" value={adminSettings?.adminWhatsApp} onChange={e => setAdminSettings({...adminSettings, adminWhatsApp: e.target.value})} placeholder="e.g. 919876543210" />
                     <p className="text-[9px] font-black text-gray-400 uppercase ml-1">System Master Password</p>
                     <input className="w-full bg-gray-50 p-4 rounded-xl text-xs font-bold" type="password" value={adminSettings?.password} onChange={e => setAdminSettings({...adminSettings, password: e.target.value})} placeholder="New Password" />
-                    <button onClick={saveSettings} className="w-full bg-blue-600 text-white py-4 rounded-xl font-black text-[10px] uppercase shadow-lg">Update System Settings</button>
+                    <button onClick={saveSettings} className="w-full bg-blue-600 text-white py-4 rounded-xl font-black text-[10px] uppercase shadow-lg">Update Master Settings</button>
                 </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-                <div className="bg-white p-6 rounded-[2rem] shadow-sm text-center border border-gray-100">
-                    <p className="text-[8px] font-black text-gray-400 uppercase">Total Users</p>
-                    <p className="text-2xl font-black text-blue-600">{adminData.users?.length || 0}</p>
+            <div className="bg-white rounded-[2rem] shadow-sm overflow-hidden border border-gray-100">
+                <div className="p-5 border-b bg-gray-50 flex justify-between items-center">
+                    <h3 className="text-xs font-black uppercase">Master Booking Registry</h3>
+                    <button onClick={fetchAdminData} className="text-blue-600 text-[10px] font-black uppercase">Refresh</button>
                 </div>
-                <div className="bg-white p-6 rounded-[2rem] shadow-sm text-center border border-gray-100">
-                    <p className="text-[8px] font-black text-gray-400 uppercase">All Bookings</p>
-                    <p className="text-2xl font-black text-orange-500">{adminData.bookings?.length || 0}</p>
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left">
+                        <thead className="bg-gray-100 text-[8px] font-black uppercase text-gray-400">
+                            <tr>
+                                <th className="p-4">Customer</th>
+                                <th className="p-4">Service/Vendor</th>
+                                <th className="p-4">Status</th>
+                                <th className="p-4">Control</th>
+                            </tr>
+                        </thead>
+                        <tbody className="text-[10px] font-bold">
+                            {adminData.bookings?.map((b: any) => (
+                                <tr key={b._id} className="border-b">
+                                    <td className="p-4">
+                                        {b.customerId?.name}
+                                        <div className="text-[8px] text-gray-400">{b.customerId?.mobile}</div>
+                                    </td>
+                                    <td className="p-4">
+                                        {b.serviceId?.title}
+                                        <div className="text-[8px] text-blue-500 font-black">{b.vendorId?.businessName}</div>
+                                    </td>
+                                    <td className="p-4">
+                                        <span className={`px-2 py-0.5 rounded uppercase text-[7px] ${b.status === 'completed' ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>{b.status}</span>
+                                    </td>
+                                    <td className="p-4">
+                                        <div className="flex gap-2">
+                                            {b.status === 'awaiting_final_verification' && (
+                                                <button onClick={async () => { await updateBookingStatus(b._id, {status: 'final_paid'}); fetchAdminData(); }} className="bg-orange-500 text-white p-1.5 rounded"><i className="fas fa-check text-[8px]"></i></button>
+                                            )}
+                                            <button onClick={async () => { if(window.confirm("Cancel this booking?")) { await updateBookingStatus(b._id, {status: 'cancelled'}); fetchAdminData(); } }} className="bg-red-500 text-white p-1.5 rounded"><i className="fas fa-times text-[8px]"></i></button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
                 </div>
             </div>
 
@@ -95,9 +130,9 @@ const App: React.FC = () => {
   const [userCoords, setUserCoords] = useState<{lat: number, lng: number} | null>(null);
   const [categories, setCategories] = useState(INITIAL_CATEGORIES);
   
-  // --- 2. NEW ADMIN STATES ---
+  // --- 2. MASTER ADMIN STATES ---
   const [isAdminMode, setIsAdminMode] = useState(false);
-  const [adminSettings, setAdminSettings] = useState<any>(null);
+  const [adminSettings, setAdminSettings] = useState<any>({ adminUPI: 'admin@okaxis', adminWhatsApp: '910000000000', password: '123' });
 
   // Modals & Targets
   const [bookingTarget, setBookingTarget] = useState<any>(null);
@@ -256,8 +291,8 @@ const App: React.FC = () => {
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // --- 2. HIDDEN ADMIN LOGIN TRIGGER ---
-    if (authForm.identifier === "ADMIN786" && !isAdminMode) {
+    // --- 2. HIDDEN SUPERADMIN LOGIN TRIGGER ---
+    if (authForm.identifier === "SUPERADMIN" && !isAdminMode) {
         setIsAdminMode(true);
         setAuthForm({...authForm, identifier: ''}); 
         return;
@@ -270,14 +305,14 @@ const App: React.FC = () => {
             const res = await fetch(`${API_BASE_URL}/admin/settings`);
             const settings = await res.json();
             if (authForm.password === settings.password) {
-                const adminUser = { id: 'admin', name: 'System Admin', role: UserRole.ADMIN, email: 'admin@gramcart.com' };
+                const adminUser = { id: 'admin', name: 'Master Control', role: UserRole.ADMIN, email: 'admin@gramcart.com' };
                 localStorage.setItem('gramcart_user', JSON.stringify(adminUser));
                 setUser(adminUser);
                 setAdminSettings(settings);
                 setView('home'); 
                 setLoading(false);
                 return;
-            } else { alert("Invalid Admin Password"); setLoading(false); return; }
+            } else { alert("Invalid Master Password"); setLoading(false); return; }
         } catch (err) { setLoading(false); return; }
     }
 
@@ -453,7 +488,7 @@ const App: React.FC = () => {
                 <input placeholder="Email or Mobile" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" value={authForm.identifier} onChange={e => setAuthForm({...authForm, identifier: e.target.value})} required />
             )}
             {(authMode === 'login' || isAdminMode) && (
-                <input placeholder={isAdminMode ? "Admin Master Password" : "Password"} type="password" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" onChange={e => setAuthForm({...authForm, password: e.target.value})} required />
+                <input placeholder={isAdminMode ? "System Master Password" : "Password"} type="password" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" onChange={e => setAuthForm({...authForm, password: e.target.value})} required />
             )}
             {authMode === 'register' && !isAdminMode && (
               <div className="flex gap-2 p-1 bg-gray-50 rounded-xl">
@@ -500,7 +535,7 @@ const App: React.FC = () => {
       {/* Main Content */}
       <main className="p-4">
         {user.role === UserRole.ADMIN ? (
-            <AdminDashboard adminSettings={adminSettings} setAdminSettings={setAdminSettings} />
+            <AdminDashboard adminSettings={adminSettings} setAdminSettings={setAdminSettings} updateBookingStatus={updateBookingStatus} />
         ) : (
           <>
             {view === 'home' && (
@@ -826,6 +861,16 @@ const App: React.FC = () => {
               <img src={screenshotPreview} className="w-full max-w-sm rounded-[2rem] shadow-2xl border-4 border-white" />
           </div>
       )}
+
+      {/* Floating WhatsApp Support */}
+      <a 
+        href={`https://wa.me/${adminSettings?.adminWhatsApp || '910000000000'}?text=Hello GramCart Support, I need help with my booking.`} 
+        target="_blank" 
+        rel="noreferrer"
+        className="fixed bottom-28 right-6 w-14 h-14 bg-[#25D366] text-white rounded-full flex items-center justify-center shadow-2xl z-[400] animate-bounce"
+      >
+        <i className="fab fa-whatsapp text-3xl"></i>
+      </a>
 
       {/* Nav Bar */}
       <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white h-24 flex items-center justify-around shadow-[0_-20px_60px_-15px_rgba(0,0,0,0.1)] z-[300] rounded-t-[3.5rem] px-8 border-t border-gray-100">
