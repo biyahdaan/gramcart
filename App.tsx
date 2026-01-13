@@ -24,11 +24,14 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(false);
   
   const [bookingTarget, setBookingTarget] = useState<any>(null);
+  const [detailTarget, setDetailTarget] = useState<any>(null); // State for viewing details
   const [authForm, setAuthForm] = useState({ identifier: '', email: '', mobile: '', password: '', name: '', role: 'user' });
   const [serviceForm, setServiceForm] = useState({
     title: '', category: 'tent', rate: '', unitType: 'Per Day', duration: '1 Day', itemsIncluded: [] as string[], contactNumber: '', _id: '', customItem: ''
   });
   const [bookingForm, setBookingForm] = useState({ startDate: '', endDate: '', address: '' });
+
+  const t = Translations[lang];
 
   useEffect(() => {
     const saved = localStorage.getItem('gramcart_user');
@@ -262,10 +265,20 @@ const App: React.FC = () => {
                   {vendor.services?.map((s: any) => (
                     <div key={s._id} className="bg-gray-50 p-4 rounded-2xl border border-gray-100 hover:border-blue-200 transition-all group">
                       <div className="flex justify-between items-start mb-2">
-                        <p className="text-xs font-black text-gray-700">{s.title}</p>
+                        <div className="flex flex-col">
+                            <p className="text-xs font-black text-gray-700">{s.title}</p>
+                            <p className="text-[9px] font-bold text-gray-400 uppercase">{s.category}</p>
+                        </div>
                         <p className="text-sm font-black text-blue-600">₹{s.rate}/<span className="text-[10px] font-normal">{s.unitType}</span></p>
                       </div>
-                      <button onClick={() => setBookingTarget(s)} className="w-full bg-blue-600 text-white py-2.5 rounded-xl text-[10px] font-black uppercase shadow-md active:scale-95 transition-all group-hover:bg-blue-700">Book Now</button>
+                      <div className="flex gap-2 mt-3">
+                        <button onClick={() => setDetailTarget(s)} className="flex-1 bg-white border border-gray-200 text-gray-600 py-2.5 rounded-xl text-[10px] font-black uppercase hover:bg-gray-50 active:scale-95 transition-all">
+                            Details
+                        </button>
+                        <button onClick={() => setBookingTarget(s)} className="flex-1 bg-blue-600 text-white py-2.5 rounded-xl text-[10px] font-black uppercase shadow-md active:scale-95 transition-all hover:bg-blue-700">
+                            Book Now
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -412,13 +425,57 @@ const App: React.FC = () => {
         )}
       </main>
 
+      {/* Detail View Modal */}
+      {detailTarget && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-md z-[110] flex items-center justify-center p-6">
+          <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 animate-slideUp shadow-2xl relative">
+            <button onClick={() => setDetailTarget(null)} className="absolute top-6 right-6 w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center text-gray-400"><i className="fas fa-times"></i></button>
+            
+            <div className="mb-6">
+                <p className="text-[10px] font-black text-blue-600 uppercase mb-1 tracking-widest">{detailTarget.category}</p>
+                <h3 className="text-xl font-black text-gray-800">{detailTarget.title}</h3>
+                <p className="text-sm font-bold text-gray-400 mt-1">₹{detailTarget.rate} / {detailTarget.unitType}</p>
+            </div>
+
+            <div className="bg-gray-50 p-6 rounded-3xl border border-gray-100 mb-6">
+                <h4 className="text-[10px] font-black text-gray-400 uppercase mb-4 tracking-wider">What's Included (शामिल सामान)</h4>
+                {detailTarget.itemsIncluded?.length > 0 ? (
+                    <ul className="space-y-3">
+                        {detailTarget.itemsIncluded.map((item: string, idx: number) => (
+                            <li key={idx} className="flex items-center gap-3 text-xs font-bold text-gray-600">
+                                <i className="fas fa-check-circle text-green-500 text-[10px]"></i>
+                                {item}
+                            </li>
+                        ))}
+                    </ul>
+                ) : (
+                    <p className="text-xs text-gray-400 italic">No specific items listed.</p>
+                )}
+            </div>
+
+            <button onClick={() => { setBookingTarget(detailTarget); setDetailTarget(null); }} className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-xs uppercase shadow-xl active:scale-95 transition-all">
+                Proceed to Booking
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Booking Checkout Modal */}
       {bookingTarget && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-md z-[100] flex items-end justify-center p-4">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-md z-[120] flex items-end justify-center p-4">
           <div className="bg-white w-full max-w-md rounded-[3rem] p-8 pb-10 animate-slideUp shadow-2xl">
             <div className="flex justify-between items-center mb-6">
               <h3 className="font-black text-xl text-gray-800">Complete Booking</h3>
               <button onClick={() => setBookingTarget(null)} className="w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center text-gray-400"><i className="fas fa-times"></i></button>
             </div>
+            
+            <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100 mb-5">
+                <p className="text-[9px] font-black text-blue-400 uppercase mb-2">Package Summary</p>
+                <p className="text-[10px] font-bold text-blue-700 leading-relaxed">
+                    {bookingTarget.itemsIncluded?.join(", ") || "Base Service"}
+                </p>
+            </div>
+
             <form onSubmit={handleBooking} className="space-y-5">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
@@ -446,6 +503,7 @@ const App: React.FC = () => {
         </div>
       )}
 
+      {/* Floating Bottom Navigation */}
       <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white/80 backdrop-blur-lg h-24 flex items-center justify-around border-t border-gray-100 shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-50 rounded-t-[3rem] px-8">
         <button onClick={() => setView('home')} className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all ${view === 'home' ? 'text-blue-600 bg-blue-50 shadow-inner' : 'text-gray-300 hover:text-blue-400'}`}><i className="fas fa-th-large text-xl"></i></button>
         <button onClick={() => setView('bookings')} className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all ${view === 'bookings' ? 'text-blue-600 bg-blue-50 shadow-inner' : 'text-gray-300 hover:text-blue-400'}`}><i className="fas fa-paper-plane text-xl"></i></button>
