@@ -6,11 +6,9 @@ const jwt = require('jsonwebtoken');
 
 const app = express();
 
-// --- MIDDLEWARE ---
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization'] }));
 app.use(express.json({ limit: '20mb' })); 
 
-// --- DB CONNECTION ---
 const MONGO_URI = process.env.MONGODB_URI || "mongodb+srv://biyahdaan_db_user:cUzpl0anIuBNuXb9@cluster0.hf1vhp3.mongodb.net/gramcart_db?retryWrites=true&w=majority";
 mongoose.connect(MONGO_URI).then(() => console.log("🚀 GramCart Server Ready")).catch(err => console.error("❌ DB Error:", err));
 
@@ -32,10 +30,8 @@ const User = mongoose.models.User || mongoose.model('User', UserSchema);
 const VendorSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', unique: true },
   businessName: { type: String, required: true, index: true },
-  rating: { type: Number, default: 5 },
   upiId: { type: String, default: 'merchant@upi' },
-  location: { lat: Number, lng: Number }, 
-  advancePercent: { type: Number, default: 10 }
+  location: { lat: Number, lng: Number }
 });
 const Vendor = mongoose.models.Vendor || mongoose.model('Vendor', VendorSchema);
 
@@ -46,10 +42,9 @@ const ServiceSchema = new mongoose.Schema({
   description: { type: String },
   unitType: { type: String, default: 'Per Day' },
   rate: { type: Number, required: true },
-  itemsIncluded: [String],
   images: [String],
   contactNumber: { type: String, required: true },
-  upiId: { type: String }, // Per-service UPI ID override
+  upiId: { type: String },
   createdAt: { type: Date, default: Date.now }
 });
 const Service = mongoose.models.Service || mongoose.model('Service', ServiceSchema);
@@ -65,16 +60,14 @@ const BookingSchema = new mongoose.Schema({
   altMobile: String,
   totalAmount: Number,
   advanceProof: String,
+  finalProof: String,
   otp: { type: String, required: true }, 
   status: { 
     type: String, 
-    enum: ['pending', 'approved', 'advance_paid', 'completed', 'rejected'], 
+    enum: ['pending', 'approved', 'awaiting_advance_verification', 'advance_paid', 'awaiting_final_verification', 'completed', 'rejected'], 
     default: 'pending' 
   },
-  review: {
-      rating: Number,
-      comment: String
-  },
+  review: { rating: Number, comment: String },
   createdAt: { type: Date, default: Date.now }
 });
 const Booking = mongoose.models.Booking || mongoose.model('Booking', BookingSchema);
@@ -85,7 +78,7 @@ app.post('/api/register', async (req, res) => {
   try {
     const { name, email, mobile, password, role, location } = req.body;
     const existing = await User.findOne({ $or: [{ email }, { mobile }] });
-    if (existing) return res.status(400).json({ error: "Mobile/Email registered" });
+    if (existing) return res.status(400).json({ error: "Registered" });
     const user = new User({ name, email, mobile, password, role, location });
     await user.save();
     if (role === 'vendor') {
@@ -100,7 +93,7 @@ app.post('/api/login', async (req, res) => {
   try {
     const { identifier, password } = req.body;
     const user = await User.findOne({ $or: [{ email: identifier }, { mobile: identifier }], password });
-    if (!user) return res.status(401).json({ error: "Invalid credentials" });
+    if (!user) return res.status(401).json({ error: "Invalid" });
     res.json({ user });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -111,13 +104,6 @@ app.post('/api/services', async (req, res) => {
     await service.save();
     res.status(201).json(service);
   } catch (err) { res.status(400).json({ error: err.message }); }
-});
-
-app.put('/api/services/:id', async (req, res) => {
-    try {
-      const service = await Service.findByIdAndUpdate(req.params.id, req.body, { new: true });
-      res.json(service);
-    } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.delete('/api/services/:id', async (req, res) => {
