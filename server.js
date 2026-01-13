@@ -169,6 +169,7 @@ app.patch('/api/bookings/:id/status', async (req, res) => {
     const { status } = req.body;
     const booking = await Booking.findByIdAndUpdate(req.params.id, req.body, { new: true });
 
+    // --- 1. AUTO-BLOCK ON APPROVAL ---
     if (status === 'approved') {
         const startDate = new Date(booking.startDate);
         const endDate = new Date(booking.endDate);
@@ -178,6 +179,7 @@ app.patch('/api/bookings/:id/status', async (req, res) => {
             dateArray.push(curr.toISOString().split('T')[0]);
             curr.setDate(curr.getDate() + 1);
         }
+        // Auto-sync blocked dates to the service
         await Service.findByIdAndUpdate(booking.serviceId, { $addToSet: { blockedDates: { $each: dateArray } } });
     }
 

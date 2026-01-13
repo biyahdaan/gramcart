@@ -382,14 +382,14 @@ const App: React.FC = () => {
     e.preventDefault();
     if (!user || !bookingTarget) return;
 
+    // --- 3. DATA INTEGRITY CHECK: PASTE AT START OF handleBooking ---
     const start = new Date(bookingForm.startDate);
     const end = new Date(bookingForm.endDate);
     const isBlocked = bookingTarget.blockedDates?.some((d: string) => {
         const blocked = new Date(d);
         return blocked >= start && blocked <= end;
     });
-
-    if (isBlocked) return alert("Dates already blocked!");
+    if (isBlocked) return alert("Error: These dates were just booked by someone else!");
 
     setLoading(true);
     try {
@@ -798,7 +798,33 @@ const App: React.FC = () => {
                     <input placeholder="Pincode" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-black" required onChange={e => setBookingForm({...bookingForm, pincode: e.target.value})} />
                     <input placeholder="Alt Mobile" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-black" onChange={e => setBookingForm({...bookingForm, altMobile: e.target.value})} />
                  </div>
-                 <button type="submit" className="w-full bg-[#fb641b] text-white py-6 rounded-2xl font-black uppercase text-xs shadow-2xl tracking-widest">Confirm Booking</button>
+                 
+                 {/* --- 2. BOOKING FORM LOGIC: REPLACE THE "Confirm Booking" BUTTON --- */}
+                 {(() => {
+                    const start = new Date(bookingForm.startDate);
+                    const end = new Date(bookingForm.endDate);
+                    const isConflict = bookingTarget.blockedDates?.some((d: string) => {
+                        const blocked = new Date(d);
+                        return blocked >= start && blocked <= end;
+                    });
+
+                    return (
+                        <div className="space-y-3">
+                            {isConflict && (
+                                <p className="text-center text-[10px] font-black text-red-500 uppercase animate-pulse">
+                                    ⚠️ This service is not available for selected dates.
+                                </p>
+                            )}
+                            <button 
+                                type="submit" 
+                                disabled={isConflict}
+                                className={`w-full py-6 rounded-2xl font-black uppercase text-xs shadow-2xl tracking-widest transition-all ${isConflict ? 'bg-gray-300 grayscale cursor-not-allowed' : 'bg-[#fb641b] text-white hover:scale-105'}`}
+                            >
+                                {isConflict ? 'Already Booked' : 'Confirm Booking'}
+                            </button>
+                        </div>
+                    );
+                 })()}
               </form>
               <button onClick={() => setBookingTarget(null)} className="w-full text-gray-400 mt-4 text-[10px] font-black uppercase">Close</button>
            </div>
@@ -817,6 +843,21 @@ const App: React.FC = () => {
                       <div className="bg-gray-50 p-6 rounded-[2rem]">
                           <p className="text-xs font-bold text-gray-600 leading-relaxed">{detailTarget.description}</p>
                       </div>
+
+                      {/* --- 2. SERVICE DETAIL PAGE: "Booked Dates" Section --- */}
+                      {detailTarget.blockedDates && detailTarget.blockedDates.length > 0 && (
+                          <div className="bg-red-50 p-4 rounded-2xl border border-red-100">
+                              <h4 className="text-[10px] font-black uppercase text-red-600 mb-2 tracking-widest">Booked Dates</h4>
+                              <div className="flex flex-wrap gap-2">
+                                  {detailTarget.blockedDates.map((d: string) => (
+                                      <span key={d} className="text-[9px] font-bold text-red-500 bg-white px-2 py-1 rounded-lg shadow-sm border border-red-50">
+                                          Already Booked on {d}
+                                      </span>
+                                  ))}
+                              </div>
+                          </div>
+                      )}
+
                       <div className="space-y-4">
                           <h4 className="font-black text-[10px] uppercase tracking-widest text-gray-400">Reviews</h4>
                           {bookings.filter(b => b.serviceId?._id === detailTarget._id && b.review?.rating).map(b => (
