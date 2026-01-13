@@ -3,12 +3,14 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 
 const app = express();
 app.use(express.json());
 app.use(cors());
 
 const MONGO_URI = "mongodb+srv://biyahdaan_db_user:cUzpl0anIuBNuXb9@cluster0.hf1vhp3.mongodb.net/gramcart_db?retryWrites=true&w=majority";
+const JWT_SECRET = "gramcart_secure_9922";
 
 let isConnected = false;
 const connectDB = async () => {
@@ -22,73 +24,94 @@ const connectDB = async () => {
 };
 
 // --- Models ---
-const User = mongoose.models.User || mongoose.model('User', new mongoose.Schema({
+const UserSchema = new mongoose.Schema({
   name: String,
   email: { type: String, unique: true, index: true },
+  mobile: { type: String, unique: true, index: true },
   password: { type: String, required: true },
-  role: { type: String, default: 'user' }
-}));
+  role: { type: String, default: 'user' },
+  location: { lat: Number, lng: Number }
+});
+const User = mongoose.models.User || mongoose.model('User', UserSchema);
 
-const Vendor = mongoose.models.Vendor || mongoose.model('Vendor', new mongoose.Schema({
+const VendorSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   businessName: { type: String, index: true },
   rating: { type: Number, default: 5 },
-  isVerified: { type: Boolean, default: false }
-}));
-
-const Service = mongoose.models.Service || mongoose.model('Service', new mongoose.Schema({
-  vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor', index: true },
-  category: { type: String, index: true },
-  title: String,
-  pricePerDay: Number
-}));
+  isVerified: { type: Boolean, default: false },
+  location: { lat: Number, lng: Number },
+  upiId: { type: String, default: '' },
+  totalEarnings: { type: Number, default: 0 }
+});
+const Vendor = mongoose.models.Vendor || mongoose.model('Vendor', VendorSchema);
 
 // --- Routes ---
 app.post('/api/login', async (req, res) => {
   await connectDB();
-  const { email, password } = req.body;
-  const user = await User.findOne({ email, password });
-  if (user) {
-    const token = jwt.sign({ id: user._id }, 'SECRET');
-    res.json({ token, user });
-  } else {
-    res.status(401).json({ error: "Invalid login credentials" });
+  try {
+    const { identifier, password } = req.body;
+    const user = await User.findOne({ 
+      $or: [{ email: identifier }, { mobile: identifier }] 
+    });
+
+    if (!user) return res.status(401).json({ error: "User not found" });
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) return res.status(401).json({ error: "Invalid credentials" });
+
+    const token = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET);
+    
+    // CRITICAL FIX: Fetch Vendor Profile if user is a vendor
+    let vendorData = null;
+    if (user.role === 'vendor') {
+      vendorData = await Vendor.findOne({ userId: user._id });
+    }
+
+    res.json({ token, user, vendor: vendorData });
+  } catch (err) {
+    res.status(500).json({ error: "Login failed" });
   }
 });
 
 app.post('/api/register', async (req, res) => {
   await connectDB();
   try {
-    const user = new User(req.body);
+    const { name, email, mobile, password, role, location } = req.body;
+    
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    const user = new User({
+      name,
+      email,
+      mobile,
+      password: hashedPassword,
+      role: role || 'user',
+      location
+    });
     await user.save();
     
-    // Auto-create vendor profile if role is vendor
     if (user.role === 'vendor') {
-      const vendor = new Vendor({ userId: user._id, businessName: `${user.name}'s Shop` });
+      const vendor = new Vendor({ 
+        userId: user._id, 
+        businessName: `${user.name}'s Shop`,
+        location 
+      });
       await vendor.save();
     }
     
-    const token = jwt.sign({ id: user._id }, 'SECRET');
+    const token = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET);
     res.json({ token, user });
   } catch (err) {
-    res.status(400).json({ error: "User already exists or missing fields" });
+    res.status(400).json({ error: "Registration failed: User may already exist" });
   }
 });
 
 app.get('/api/search', async (req, res) => {
   await connectDB();
-  const { cat } = req.query;
   try {
     const vendors = await Vendor.find().lean();
-    const enriched = await Promise.all(vendors.map(async (v) => {
-      let query = { vendorId: v._id };
-      if (cat) query.category = cat;
-      const services = await Service.find(query);
-      return { ...v, services };
-    }));
-    // Filter out vendors with no matching services if category is provided
-    const filtered = cat ? enriched.filter(v => v.services.length > 0) : enriched;
-    res.json(filtered);
+    res.json(vendors);
   } catch (err) {
     res.status(500).json({ error: "Search failed" });
   }
