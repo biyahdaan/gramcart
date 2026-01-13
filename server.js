@@ -78,7 +78,7 @@ app.post('/api/register', async (req, res) => {
   try {
     const { name, email, mobile, password, role, location } = req.body;
     const existing = await User.findOne({ $or: [{ email }, { mobile }] });
-    if (existing) return res.status(400).json({ error: "Registered" });
+    if (existing) return res.status(400).json({ error: "Already Registered" });
     const user = new User({ name, email, mobile, password, role, location });
     await user.save();
     if (role === 'vendor') {
@@ -120,7 +120,7 @@ app.get('/api/search', async (req, res) => {
     const results = await Promise.all(vendors.map(async (v) => {
       let query = { vendorId: v._id };
       if (cat) query.category = cat;
-      const services = await Service.find(query);
+      const services = await Service.find(query).sort({ createdAt: -1 });
       return { ...v, services };
     }));
     res.json(cat ? results.filter(v => v.services.length > 0) : results);
