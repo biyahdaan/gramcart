@@ -6,7 +6,6 @@ import { LanguageSwitch } from './components/LanguageSwitch';
 
 const API_BASE_URL = "https://biyahdaan.onrender.com/api"; 
 
-// --- 2. ADMIN DASHBOARD COMPONENT (Updated with Global Controls & Verification UI) ---
 const AdminDashboard = ({ adminSettings, setAdminSettings, updateBookingStatus }: { adminSettings: any, setAdminSettings: any, updateBookingStatus: any }) => {
     const [adminData, setAdminData] = useState<any>(null);
     const [viewProof, setViewProof] = useState<string | null>(null);
@@ -94,7 +93,6 @@ const AdminDashboard = ({ adminSettings, setAdminSettings, updateBookingStatus }
                 </div>
             </div>
 
-            {/* Final Screenshot Proof Modal */}
             {viewProof && (
                 <div className="fixed inset-0 bg-black/90 z-[999] flex items-center justify-center p-6 backdrop-blur-md" onClick={() => setViewProof(null)}>
                     <div className="relative max-w-sm w-full animate-slideUp">
@@ -128,6 +126,10 @@ const AdminDashboard = ({ adminSettings, setAdminSettings, updateBookingStatus }
 };
 
 const App: React.FC = () => {
+  // --- 1. NEW STATE FOR SPLASH & CUSTOM CATEGORY ---
+  const [showSplash, setShowSplash] = useState(true);
+  const [isOtherCategory, setIsOtherCategory] = useState(false);
+
   // --- States ---
   const [lang, setLang] = useState<Language>(Language.EN);
   const [user, setUser] = useState<User | null>(null);
@@ -145,11 +147,9 @@ const App: React.FC = () => {
   const [userCoords, setUserCoords] = useState<{lat: number, lng: number} | null>(null);
   const [categories, setCategories] = useState(INITIAL_CATEGORIES);
   
-  // --- 2. MASTER ADMIN STATES ---
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [adminSettings, setAdminSettings] = useState<any>({ adminUPI: 'admin@okaxis', adminWhatsApp: '910000000000', password: '123' });
 
-  // Modals & Targets
   const [bookingTarget, setBookingTarget] = useState<any>(null);
   const [detailTarget, setDetailTarget] = useState<any>(null); 
   const [otpTarget, setOtpTarget] = useState<{id: string, code: string, correctCode: string} | null>(null);
@@ -157,7 +157,6 @@ const App: React.FC = () => {
   const [screenshotPreview, setScreenshotPreview] = useState<string | null>(null);
   const [activeImageIdx, setActiveImageIdx] = useState(0);
   
-  // Forms
   const [authForm, setAuthForm] = useState({ identifier: '', email: '', mobile: '', password: '', name: '', role: 'user' });
   const [serviceForm, setServiceForm] = useState({
     title: '', category: 'tent', description: '', rate: '', unitType: 'Per Day', 
@@ -172,7 +171,12 @@ const App: React.FC = () => {
   const proofInputRef = useRef<HTMLInputElement>(null);
   const finalProofInputRef = useRef<HTMLInputElement>(null);
 
-  // --- CORE LOGIC: calculateDistance ---
+  // --- SPLASH TIMER ---
+  useEffect(() => {
+    const timer = setTimeout(() => setShowSplash(false), 3000);
+    return () => clearTimeout(timer);
+  }, []);
+
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
     const R = 6371; 
     const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -184,7 +188,6 @@ const App: React.FC = () => {
     return R * c;
   };
 
-  // --- CORE LOGIC: compressImage ---
   const compressImage = (base64Str: string): Promise<string> => {
     return new Promise((resolve) => {
       const img = new Image();
@@ -203,7 +206,6 @@ const App: React.FC = () => {
     });
   };
 
-  // --- CORE LOGIC: startVoiceSearch ---
   const startVoiceSearch = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) return alert("Voice Search not supported.");
@@ -218,7 +220,6 @@ const App: React.FC = () => {
     recognition.onerror = () => setIsListening(false);
   };
 
-  // --- Logout Function ---
   const handleLogout = () => {
     localStorage.removeItem('gramcart_user');
     setUser(null);
@@ -239,7 +240,6 @@ const App: React.FC = () => {
     return matchesSearch;
   });
 
-  // --- Auth & Sync ---
   useEffect(() => {
     const saved = localStorage.getItem('gramcart_user');
     if (saved) {
@@ -258,7 +258,6 @@ const App: React.FC = () => {
       );
     }
     fetchData();
-    // Fetch initial admin settings
     fetch(`${API_BASE_URL}/admin/settings`).then(r => r.json()).then(setAdminSettings).catch(e => {});
   }, []);
 
@@ -303,7 +302,6 @@ const App: React.FC = () => {
     }
   }, [user, view]);
 
-  // --- Actions ---
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     if (authForm.identifier === "SUPERADMIN" && !isAdminMode) {
@@ -343,6 +341,17 @@ const App: React.FC = () => {
 
   const handleAddOrUpdateService = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // --- 4. COMPULSORY MOBILE & CATEGORY VALIDATION ---
+    if (!serviceForm.contactNumber || serviceForm.contactNumber.length < 10) {
+        alert("❌ COMPULSORY: Please add a valid 10-digit mobile number to list this service.");
+        return;
+    }
+    if (!serviceForm.category) {
+        alert("❌ Please select or enter a category.");
+        return;
+    }
+
     if (!user) return alert("Please login");
     setLoading(true); setPublishStatus('Syncing Service...');
     try {
@@ -369,6 +378,7 @@ const App: React.FC = () => {
         setTimeout(() => {
           setServiceForm({ title: '', category: 'tent', description: '', rate: '', unitType: 'Per Day', inventoryList: [], images: [], contactNumber: '', _id: '', upiId: '', variant: 'Simple', blockedDates: [] });
           setPublishStatus(''); fetchMyServices(); setView('vendor-dashboard'); setLoading(false);
+          setIsOtherCategory(false);
         }, 1500);
       }
     } catch (e) { alert("Save failed"); setLoading(false); }
@@ -503,6 +513,22 @@ const App: React.FC = () => {
 
   return (
     <div className="max-w-md mx-auto min-h-screen bg-[#f1f3f6] pb-24 relative overflow-x-hidden">
+      
+      {/* --- 1. STYLISH SPLASH SCREEN (3 SECONDS) --- */}
+      {showSplash && (
+        <div className="fixed inset-0 bg-gradient-to-br from-[#2874f0] to-[#1e5bb8] z-[9999] flex flex-col items-center justify-center animate-pulse">
+            <div className="text-center animate-bounce">
+            <h1 className="text-6xl font-black text-white italic tracking-tighter drop-shadow-2xl">GramCart</h1>
+            <p className="text-white/70 text-[10px] font-black uppercase tracking-[0.3em] mt-4">Rural Hyper-local Marketplace</p>
+            </div>
+            <div className="absolute bottom-12 flex gap-2">
+            <div className="w-2 h-2 bg-white rounded-full animate-bounce delay-75"></div>
+            <div className="w-2 h-2 bg-white rounded-full animate-bounce delay-150"></div>
+            <div className="w-2 h-2 bg-white rounded-full animate-bounce delay-300"></div>
+            </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="bg-[#2874f0] p-4 text-white sticky top-0 z-[100] shadow-md rounded-b-[1.5rem]">
         <div className="flex justify-between items-center mb-4">
@@ -659,25 +685,65 @@ const App: React.FC = () => {
                         </div>
                      </div>
                      
-                     <input placeholder="Service Title (e.g. Royal Buffet)" className="w-full bg-gray-50 p-4 rounded-xl font-bold" value={serviceForm.title} onChange={e => setServiceForm({...serviceForm, title: e.target.value})} required />
+                     {/* --- 3. UPDATED ADD SERVICE FORM: CUSTOM CATEGORY & MOBILE --- */}
+                     <input 
+                        placeholder="Service Title (e.g. Royal Buffet)" 
+                        className="w-full bg-gray-50 p-4 rounded-xl font-bold" 
+                        value={serviceForm.title} 
+                        onChange={e => setServiceForm({...serviceForm, title: e.target.value})} 
+                        required 
+                     />
                      
                      <div className="grid grid-cols-2 gap-4">
-                        <select className="w-full bg-gray-50 p-4 rounded-xl font-bold text-xs" value={serviceForm.category} onChange={e => setServiceForm({...serviceForm, category: e.target.value, inventoryList: []})}>
+                        <select 
+                            className="w-full bg-gray-50 p-4 rounded-xl font-bold text-xs" 
+                            value={isOtherCategory ? 'other' : serviceForm.category} 
+                            onChange={e => {
+                                if(e.target.value === 'other') {
+                                    setIsOtherCategory(true);
+                                    setServiceForm({...serviceForm, category: ''});
+                                } else {
+                                    setIsOtherCategory(false);
+                                    setServiceForm({...serviceForm, category: e.target.value, inventoryList: []});
+                                }
+                            }}
+                        >
                             {Object.entries(GLOBAL_CATEGORIES).map(([id, cat]) => (
                                 <option key={id} value={id}>{cat.name}</option>
                             ))}
+                            <option value="other">➕ Other / Add New</option>
                         </select>
                         <input placeholder="Rate (₹)" type="number" className="w-full bg-gray-50 p-4 rounded-xl font-bold" value={serviceForm.rate} onChange={e => setServiceForm({...serviceForm, rate: e.target.value})} required />
                      </div>
 
-                     {/* Itemized Inventory Selection (NEW FEATURE 2) */}
+                     {isOtherCategory && (
+                        <input 
+                            placeholder="Enter Custom Category Name" 
+                            className="w-full bg-blue-50 p-4 rounded-xl font-black text-xs border border-blue-200 animate-slideIn"
+                            value={serviceForm.category}
+                            onChange={e => setServiceForm({...serviceForm, category: e.target.value})}
+                            required
+                        />
+                     )}
+
+                     <div className="space-y-1">
+                        <p className="text-[9px] font-black text-red-500 uppercase ml-2">Contact Number (Compulsory)*</p>
+                        <input 
+                            placeholder="Vendor Mobile Number" 
+                            className="w-full bg-white p-4 rounded-xl font-bold border-2 border-gray-100 focus:border-blue-500" 
+                            value={serviceForm.contactNumber} 
+                            onChange={e => setServiceForm({...serviceForm, contactNumber: e.target.value})} 
+                            required 
+                        />
+                     </div>
+
                      <div className="bg-gray-50/50 p-5 rounded-[2rem] border border-gray-100">
-                        <h4 className="text-[10px] font-black uppercase text-gray-400 mb-4 tracking-widest">Select Included Items</h4>
+                        <h4 className="text-[10px] font-black uppercase text-gray-400 mb-4 tracking-widest">Included Items</h4>
                         <div className="grid grid-cols-1 gap-2">
                             {GLOBAL_CATEGORIES[serviceForm.category]?.items.map(item => {
                                 const isSelected = serviceForm.inventoryList.some(i => i.name === item);
                                 return (
-                                    <div key={item} className="flex items-center gap-3 p-3 bg-white rounded-xl shadow-sm border border-gray-50">
+                                    <div key={item} className="flex items-center gap-3 p-3 bg-white rounded-xl shadow-sm border border-gray-100">
                                         <input 
                                             type="checkbox" 
                                             className="w-4 h-4 rounded accent-blue-600"
@@ -706,7 +772,6 @@ const App: React.FC = () => {
                             })}
                         </div>
                         
-                        {/* Custom Item Add */}
                         <div className="mt-6 pt-6 border-t border-gray-200">
                             <p className="text-[9px] font-black text-gray-400 uppercase mb-3">Add Custom Item</p>
                             <div className="flex gap-2">
@@ -717,14 +782,6 @@ const App: React.FC = () => {
                                     setServiceForm({...serviceForm, inventoryList: [...serviceForm.inventoryList, customItem]});
                                     setCustomItem({name: '', qty: ''});
                                 }} className="bg-blue-600 text-white w-10 h-10 rounded-xl flex items-center justify-center"><i className="fas fa-plus"></i></button>
-                            </div>
-                            <div className="flex flex-wrap gap-2 mt-4">
-                                {serviceForm.inventoryList.filter(i => !GLOBAL_CATEGORIES[serviceForm.category]?.items.includes(i.name)).map(i => (
-                                    <span key={i.name} className="bg-blue-50 text-blue-600 text-[9px] px-3 py-1.5 rounded-full font-black flex items-center gap-2">
-                                        {i.name} ({i.qty})
-                                        <i className="fas fa-times cursor-pointer opacity-50" onClick={() => setServiceForm({...serviceForm, inventoryList: serviceForm.inventoryList.filter(x => x.name !== i.name)})}></i>
-                                    </span>
-                                ))}
                             </div>
                         </div>
                      </div>
@@ -796,7 +853,6 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {/* Booking Details Modal */}
       {bookingTarget && (
         <div className="fixed inset-0 bg-black/60 z-[400] flex items-center justify-center p-6 backdrop-blur-sm overflow-y-auto">
            <div className="bg-white w-full rounded-[2.5rem] p-10 animate-slideUp shadow-2xl">
@@ -829,7 +885,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Service Detail Page (Updated with Inventory View - NEW FEATURE 3) */}
       {detailTarget && (
           <div className="fixed inset-0 bg-black/95 z-[500] overflow-y-auto">
               <div className="max-w-md mx-auto min-h-screen bg-white relative pb-32">
@@ -839,7 +894,6 @@ const App: React.FC = () => {
                       <h1 className="text-2xl font-black text-gray-800 uppercase tracking-tighter">{detailTarget.title}</h1>
                       <p className="text-3xl font-black text-gray-900 italic">₹{detailTarget.rate}/-</p>
                       
-                      {/* Inventory / What's Included */}
                       {detailTarget.inventoryList && detailTarget.inventoryList.length > 0 && (
                           <div className="bg-blue-50/50 p-6 rounded-[2rem] border border-blue-100">
                               <h4 className="text-[10px] font-black uppercase text-blue-600 mb-4 tracking-widest flex items-center gap-2"><i className="fas fa-list-check"></i> What's Included / Inventory</h4>
@@ -854,7 +908,6 @@ const App: React.FC = () => {
                           </div>
                       )}
 
-                      {/* Blocked Dates */}
                       {detailTarget.blockedDates && detailTarget.blockedDates.length > 0 && (
                           <div className="bg-red-50 p-4 rounded-2xl border border-red-100">
                               <h4 className="text-[10px] font-black uppercase text-red-600 mb-2 tracking-widest">Booked Dates</h4>
@@ -874,7 +927,6 @@ const App: React.FC = () => {
           </div>
       )}
 
-      {/* Floating WhatsApp Support */}
       <a 
         href={`https://wa.me/${adminSettings?.adminWhatsApp || '910000000000'}?text=Hello GramCart Support, I need help with my booking.`} 
         target="_blank" 
@@ -884,7 +936,6 @@ const App: React.FC = () => {
         <i className="fab fa-whatsapp text-3xl"></i>
       </a>
 
-      {/* Nav Bar */}
       <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white h-24 flex items-center justify-around shadow-[0_-20px_60px_-15px_rgba(0,0,0,0.1)] z-[300] rounded-t-[3.5rem] px-8 border-t border-gray-100">
         <button onClick={() => setView('home')} className={`flex flex-col items-center gap-2 ${view === 'home' ? 'text-[#2874f0]' : 'text-gray-300'}`}><i className="fas fa-home text-xl"></i><span className="text-[8px] font-black uppercase">Home</span></button>
         <button onClick={() => setView('bookings')} className={`flex flex-col items-center gap-2 ${view === 'bookings' ? 'text-[#2874f0]' : 'text-gray-300'}`}><i className="fas fa-shopping-bag text-xl"></i><span className="text-[8px] font-black uppercase">Orders</span></button>
