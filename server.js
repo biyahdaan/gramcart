@@ -12,7 +12,7 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '15mb' })); // Increased limit for compressed images
 
 // --- DATABASE CONNECTION ---
 const MONGO_URI = process.env.MONGODB_URI || "mongodb+srv://biyahdaan_db_user:cUzpl0anIuBNuXb9@cluster0.hf1vhp3.mongodb.net/gramcart_db?retryWrites=true&w=majority";
@@ -23,24 +23,26 @@ mongoose.connect(MONGO_URI)
 
 // --- SCHEMAS ---
 
-const User = mongoose.models.User || mongoose.model('User', new mongoose.Schema({
+const UserSchema = new mongoose.Schema({
   name: { type: String, required: true },
   email: { type: String, unique: true, sparse: true, index: true },
   mobile: { type: String, unique: true, required: true, index: true },
   password: { type: String, required: true },
   role: { type: String, enum: ['user', 'vendor'], default: 'user' }
-}));
+});
+const User = mongoose.models.User || mongoose.model('User', UserSchema);
 
-const Vendor = mongoose.models.Vendor || mongoose.model('Vendor', new mongoose.Schema({
+const VendorSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', unique: true },
   businessName: { type: String, required: true, index: true },
   rating: { type: Number, default: 5 },
   isVerified: { type: Boolean, default: false },
-  upiId: { type: String },
+  upiId: { type: String, default: 'merchant@upi' },
   advancePercent: { type: Number, default: 10 }
-}));
+});
+const Vendor = mongoose.models.Vendor || mongoose.model('Vendor', VendorSchema);
 
-const Service = mongoose.models.Service || mongoose.model('Service', new mongoose.Schema({
+const ServiceSchema = new mongoose.Schema({
   vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor', index: true, required: true },
   category: { type: String, required: true, index: true },
   title: { type: String, required: true },
@@ -51,9 +53,10 @@ const Service = mongoose.models.Service || mongoose.model('Service', new mongoos
   images: [String],
   contactNumber: { type: String, required: true },
   createdAt: { type: Date, default: Date.now }
-}));
+});
+const Service = mongoose.models.Service || mongoose.model('Service', ServiceSchema);
 
-const Booking = mongoose.models.Booking || mongoose.model('Booking', new mongoose.Schema({
+const BookingSchema = new mongoose.Schema({
   customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true },
   vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor', index: true },
   serviceId: { type: mongoose.Schema.Types.ObjectId, ref: 'Service' },
@@ -68,12 +71,10 @@ const Booking = mongoose.models.Booking || mongoose.model('Booking', new mongoos
     enum: ['pending', 'approved', 'advance_paid', 'completed', 'reviewed', 'rejected', 'cancelled'], 
     default: 'pending' 
   },
-  review: {
-    rating: Number,
-    comment: String
-  },
+  review: { rating: Number, comment: String },
   createdAt: { type: Date, default: Date.now }
-}));
+});
+const Booking = mongoose.models.Booking || mongoose.model('Booking', BookingSchema);
 
 // --- ROUTES ---
 
@@ -81,7 +82,7 @@ app.post('/api/register', async (req, res) => {
   try {
     const { name, email, mobile, password, role } = req.body;
     const existing = await User.findOne({ $or: [{ email }, { mobile }] });
-    if (existing) return res.status(400).json({ error: "Mobile or Email already exists" });
+    if (existing) return res.status(400).json({ error: "Mobile or Email already registered" });
 
     const user = new User({ name, email, mobile, password, role });
     await user.save();
@@ -98,29 +99,22 @@ app.post('/api/login', async (req, res) => {
   try {
     const { identifier, password } = req.body;
     const user = await User.findOne({ $or: [{ email: identifier }, { mobile: identifier }], password });
-    if (!user) return res.status(401).json({ error: "Invalid credentials" });
+    if (!user) return res.status(401).json({ error: "Invalid Login Details" });
     const token = jwt.sign({ id: user._id }, 'GRAM_SECRET_KEY');
     res.json({ token, user });
-  } catch (err) { res.status(500).json({ error: "Login error" }); }
+  } catch (err) { res.status(500).json({ error: "Server Error during login" }); }
 });
 
-// FIXED SERVICE POSTING ROUTE
 app.post('/api/services', async (req, res) => {
   try {
-    console.log("Receiving Service Data:", req.body);
     const { vendorId, category, title, rate, contactNumber } = req.body;
-    
     if (!vendorId || !category || !title || !rate || !contactNumber) {
-      return res.status(400).json({ error: "Missing required fields: Title, Category, Rate, or Contact" });
+      return res.status(400).json({ error: "Missing required service details" });
     }
-
     const newService = new Service(req.body);
     const saved = await newService.save();
     res.status(201).json(saved);
-  } catch (err) { 
-    console.error("Service Save Error:", err);
-    res.status(400).json({ error: err.message }); 
-  }
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.put('/api/services/:id', async (req, res) => {
@@ -137,13 +131,6 @@ app.delete('/api/services/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/my-services/:vendorId', async (req, res) => {
-  try {
-    const services = await Service.find({ vendorId: req.params.vendorId }).sort({ createdAt: -1 });
-    res.json(services);
-  } catch (err) { res.status(500).json({ error: "Fetch error" }); }
-});
-
 app.get('/api/search', async (req, res) => {
   try {
     const { cat } = req.query;
@@ -156,7 +143,14 @@ app.get('/api/search', async (req, res) => {
     }));
     const filtered = cat ? results.filter(v => v.services.length > 0) : results;
     res.json(filtered);
-  } catch (err) { res.status(500).json({ error: "Search error" }); }
+  } catch (err) { res.status(500).json({ error: "Search failed" }); }
+});
+
+app.get('/api/my-services/:vendorId', async (req, res) => {
+  try {
+    const services = await Service.find({ vendorId: req.params.vendorId }).sort({ createdAt: -1 });
+    res.json(services);
+  } catch (err) { res.status(500).json({ error: "Fetch error" }); }
 });
 
 app.post('/api/bookings', async (req, res) => {
@@ -164,7 +158,7 @@ app.post('/api/bookings', async (req, res) => {
     const booking = new Booking(req.body);
     await booking.save();
     res.status(201).json(booking);
-  } catch (err) { res.status(500).json({ error: "Booking error" }); }
+  } catch (err) { res.status(500).json({ error: "Booking system offline" }); }
 });
 
 app.get('/api/my-bookings/:role/:id', async (req, res) => {
@@ -183,7 +177,7 @@ app.get('/api/my-bookings/:role/:id', async (req, res) => {
       .populate('vendorId', 'businessName upiId advancePercent')
       .sort({ createdAt: -1 });
     res.json(bookings);
-  } catch (err) { res.status(500).json({ error: "Booking fetch error" }); }
+  } catch (err) { res.status(500).json({ error: "Fetch failed" }); }
 });
 
 app.patch('/api/bookings/:id/status', async (req, res) => {
@@ -191,13 +185,6 @@ app.patch('/api/bookings/:id/status', async (req, res) => {
     const booking = await Booking.findByIdAndUpdate(req.params.id, req.body, { new: true });
     res.json(booking);
   } catch (err) { res.status(500).json({ error: "Status update failed" }); }
-});
-
-app.patch('/api/vendor-profile/:userId', async (req, res) => {
-  try {
-    const updated = await Vendor.findOneAndUpdate({ userId: req.params.userId }, req.body, { new: true });
-    res.json(updated);
-  } catch (err) { res.status(500).json({ error: "Update failed" }); }
 });
 
 const PORT = process.env.PORT || 5000;
