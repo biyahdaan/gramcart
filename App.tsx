@@ -46,7 +46,7 @@ const App: React.FC = () => {
   const proofInputRef = useRef<HTMLInputElement>(null);
   const finalProofInputRef = useRef<HTMLInputElement>(null);
 
-  // --- Core Utility Functions (Distance & Compression) ---
+  // --- CORE LOGIC: calculateDistance (Restored) ---
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
     const R = 6371; 
     const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -58,6 +58,7 @@ const App: React.FC = () => {
     return R * c;
   };
 
+  // --- CORE LOGIC: compressImage (Restored) ---
   const compressImage = (base64Str: string): Promise<string> => {
     return new Promise((resolve) => {
       const img = new Image();
@@ -76,6 +77,30 @@ const App: React.FC = () => {
     });
   };
 
+  // --- CORE LOGIC: startVoiceSearch (Restored) ---
+  const startVoiceSearch = () => {
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) return alert("Voice Search not supported.");
+    const recognition = new SpeechRecognition();
+    recognition.lang = lang === Language.HI ? 'hi-IN' : 'en-US';
+    recognition.start();
+    setIsListening(true);
+    recognition.onresult = (event: any) => {
+      setSearchQuery(event.results[0][0].transcript);
+      setIsListening(false);
+    };
+    recognition.onerror = () => setIsListening(false);
+  };
+
+  // --- Logout Function (New) ---
+  const handleLogout = () => {
+    localStorage.removeItem('gramcart_user');
+    setUser(null);
+    setVendorProfile(null);
+    setView('home');
+    setAuthMode('login');
+  };
+
   const filteredData = data.filter(vendor => {
     const searchLower = searchQuery.toLowerCase();
     const matchesSearch = vendor.businessName?.toLowerCase().includes(searchLower) || 
@@ -87,7 +112,7 @@ const App: React.FC = () => {
     return matchesSearch;
   });
 
-  // --- Auth & Profile ---
+  // --- Auth & Sync ---
   useEffect(() => {
     const saved = localStorage.getItem('gramcart_user');
     if (saved) {
@@ -117,15 +142,6 @@ const App: React.FC = () => {
     } catch (e) {}
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('gramcart_user');
-    setUser(null);
-    setVendorProfile(null);
-    setView('home');
-    setAuthMode('login');
-  };
-
-  // --- Fetching Logic ---
   const fetchData = async (cat: string = '') => {
     setLoading(true);
     try {
@@ -159,41 +175,6 @@ const App: React.FC = () => {
   }, [user, view]);
 
   // --- Actions ---
-  const startVoiceSearch = () => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) return alert("Voice Search not supported.");
-    const recognition = new SpeechRecognition();
-    recognition.lang = lang === Language.HI ? 'hi-IN' : 'en-US';
-    recognition.start();
-    setIsListening(true);
-    recognition.onresult = (event: any) => {
-      setSearchQuery(event.results[0][0].transcript);
-      setIsListening(false);
-    };
-    recognition.onerror = () => setIsListening(false);
-  };
-
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-    Array.from(files).forEach(file => {
-      const reader = new FileReader();
-      reader.onloadend = () => setServiceForm(prev => ({ ...prev, images: [...prev.images, reader.result as string].slice(0, 5) }));
-      reader.readAsDataURL(file);
-    });
-  };
-
-  const removeImage = (index: number) => {
-    setServiceForm(prev => ({ ...prev, images: prev.images.filter((_, i) => i !== index) }));
-  };
-
-  const toggleWishlist = (id: string) => {
-    if (!user) return;
-    const newWish = wishlist.includes(id) ? wishlist.filter(i => i !== id) : [...wishlist, id];
-    setWishlist(newWish);
-    localStorage.setItem(`wish_${user._id || user.id}`, JSON.stringify(newWish));
-  };
-
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -214,19 +195,17 @@ const App: React.FC = () => {
   const handleAddOrUpdateService = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return alert("Please login");
-    setLoading(true); setPublishStatus('Syncing with Seller Hub...');
+    setLoading(true); setPublishStatus('Syncing Service...');
     try {
       const compressedImages = await Promise.all(serviceForm.images.map(img => img.startsWith('data:image') ? compressImage(img) : img));
       const vRes = await fetch(`${API_BASE_URL}/search`);
       const allV = await vRes.json();
       const v = allV.find((vend: any) => vend.userId === (user._id || user.id));
-      if (!v) throw new Error("Vendor profile missing");
+      if (!v) throw new Error("Profile missing");
 
       const payload = {
-        title: serviceForm.title, category: serviceForm.category, description: serviceForm.description,
-        rate: Number(serviceForm.rate), unitType: serviceForm.unitType, inventoryList: serviceForm.inventoryList,
-        images: compressedImages, contactNumber: serviceForm.contactNumber, vendorId: v._id,
-        upiId: serviceForm.upiId || v.upiId, variant: serviceForm.variant, blockedDates: serviceForm.blockedDates
+        ...serviceForm, images: compressedImages, vendorId: v._id,
+        rate: Number(serviceForm.rate)
       };
 
       const isUpdating = !!serviceForm._id;
@@ -237,20 +216,20 @@ const App: React.FC = () => {
       });
 
       if (res.ok) {
-        setPublishStatus('Success! Listing is now Live.');
+        setPublishStatus('Live!');
         setTimeout(() => {
           setServiceForm({ title: '', category: 'tent', description: '', rate: '', unitType: 'Per Day', inventoryList: [], images: [], contactNumber: '', _id: '', upiId: '', variant: 'Simple', blockedDates: [] });
           setPublishStatus(''); fetchMyServices(); setView('vendor-dashboard'); setLoading(false);
         }, 1500);
       }
-    } catch (e) { alert("Error saving service"); setLoading(false); }
+    } catch (e) { alert("Save failed"); setLoading(false); }
   };
 
+  // --- RECOVERY: Restored Full Booking & UPI Logic ---
   const handleBooking = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !bookingTarget) return;
 
-    // Availability Check
     const start = new Date(bookingForm.startDate);
     const end = new Date(bookingForm.endDate);
     const isBlocked = bookingTarget.blockedDates?.some((d: string) => {
@@ -258,7 +237,7 @@ const App: React.FC = () => {
         return blocked >= start && blocked <= end;
     });
 
-    if (isBlocked) return alert("This service is already booked or blocked for the selected dates!");
+    if (isBlocked) return alert("Dates already blocked!");
 
     setLoading(true);
     try {
@@ -281,37 +260,6 @@ const App: React.FC = () => {
     } catch (e) {} finally { setLoading(false); }
   };
 
-  const handleReviewSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!reviewTarget) return;
-    setLoading(true);
-    try {
-        const res = await fetch(`${API_BASE_URL}/bookings/${reviewTarget._id}/status`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ review: reviewForm })
-        });
-        if (res.ok) {
-            alert("Rating submitted!");
-            setReviewTarget(null);
-            fetchBookings();
-            fetchData();
-        }
-    } catch (e) {} finally { setLoading(false); }
-  };
-
-  const updateBookingStatus = async (id: string, payload: any) => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_BASE_URL}/bookings/${id}/status`, { 
-        method: 'PATCH', 
-        headers: { 'Content-Type': 'application/json' }, 
-        body: JSON.stringify(payload) 
-      });
-      if (res.ok) fetchBookings();
-    } catch (e) {} finally { setLoading(false); }
-  };
-
   const handleProofUpload = (e: React.ChangeEvent<HTMLInputElement>, bookingId: string, field: 'advanceProof' | 'finalProof') => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -328,6 +276,39 @@ const App: React.FC = () => {
       fetchBookings(); setLoading(false);
     };
     reader.readAsDataURL(file);
+  };
+
+  const handleReviewSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reviewTarget) return;
+    setLoading(true);
+    try {
+        const res = await fetch(`${API_BASE_URL}/bookings/${reviewTarget._id}/status`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ review: reviewForm })
+        });
+        if (res.ok) { alert("Rated!"); setReviewTarget(null); fetchBookings(); fetchData(); }
+    } catch (e) {} finally { setLoading(false); }
+  };
+
+  const updateBookingStatus = async (id: string, payload: any) => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/bookings/${id}/status`, { 
+        method: 'PATCH', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify(payload) 
+      });
+      if (res.ok) fetchBookings();
+    } catch (e) {} finally { setLoading(false); }
+  };
+
+  const toggleWishlist = (id: string) => {
+    if (!user) return;
+    const newWish = wishlist.includes(id) ? wishlist.filter(i => i !== id) : [...wishlist, id];
+    setWishlist(newWish);
+    localStorage.setItem(`wish_${user._id || user.id}`, JSON.stringify(newWish));
   };
 
   // --- UI Components ---
@@ -370,7 +351,7 @@ const App: React.FC = () => {
                 ))}
               </div>
             )}
-            <button className="w-full py-5 rounded-xl font-black text-white bg-[#fb641b] shadow-xl uppercase text-xs tracking-widest">{loading ? 'Please wait...' : (authMode === 'login' ? 'Login' : 'Sign Up')}</button>
+            <button className="w-full py-5 rounded-xl font-black text-white bg-[#fb641b] shadow-xl uppercase text-xs tracking-widest tracking-widest">{loading ? 'Please wait...' : (authMode === 'login' ? 'Login' : 'Sign Up')}</button>
           </form>
           <p className="text-center mt-6 text-[11px] font-black text-[#2874f0] cursor-pointer" onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}>{authMode === 'login' ? "New User? Register Now" : "Back to Login"}</p>
         </div>
@@ -380,20 +361,13 @@ const App: React.FC = () => {
 
   return (
     <div className="max-w-md mx-auto min-h-screen bg-[#f1f3f6] pb-24 relative overflow-x-hidden">
-      {loading && publishStatus && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[1000] flex flex-col items-center justify-center p-8">
-            <div className="w-24 h-24 border-8 border-white/20 border-t-[#fb641b] rounded-full animate-spin mb-8 shadow-2xl"></div>
-            <p className="text-white font-black text-2xl uppercase tracking-tighter text-center">{publishStatus}</p>
-        </div>
-      )}
-
       {/* Header */}
       <header className="bg-[#2874f0] p-4 text-white sticky top-0 z-[100] shadow-md rounded-b-[1.5rem]">
         <div className="flex justify-between items-center mb-4">
           <div className="flex items-center gap-3"><i className="fas fa-bars text-xl"></i><h1 className="text-2xl font-black italic tracking-tighter">GramCart</h1></div>
           <div className="flex items-center gap-3">
              {user.role === 'vendor' && (
-                 <div className="relative cursor-pointer" onClick={() => setView('bookings')}>
+                 <div className="relative cursor-pointer mr-1" onClick={() => setView('bookings')}>
                     <i className="fas fa-bell text-lg"></i>
                     {pendingCount > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[7px] font-bold w-3 h-3 flex items-center justify-center rounded-full animate-bounce">{pendingCount}</span>}
                  </div>
@@ -446,18 +420,18 @@ const App: React.FC = () => {
         {view === 'vendor-dashboard' && (
           <div className="space-y-6 animate-slideIn">
               <div className="bg-gradient-to-br from-[#2874f0] to-[#1e5bbd] p-8 rounded-[2.5rem] text-white shadow-xl relative overflow-hidden">
-                  <p className="text-[10px] font-black uppercase tracking-[0.2em] mb-2 opacity-80">Total Earnings Verified</p>
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] mb-2 opacity-80">Total Business Done</p>
                   <h2 className="text-4xl font-black italic">₹{bookings.filter(b => b.status === 'completed').reduce((sum, b) => sum + (b.totalAmount || 0), 0)}</h2>
                   <i className="fas fa-wallet absolute -bottom-4 -right-4 text-white/10 text-9xl"></i>
               </div>
 
               <div className="bg-white p-6 rounded-[2.5rem] shadow-sm">
                   <div className="flex justify-between items-center mb-6">
-                      <h3 className="font-black uppercase text-xs tracking-widest">Your Inventory</h3>
+                      <h3 className="font-black uppercase text-xs tracking-widest">Listings</h3>
                       <button onClick={() => { 
                           setServiceForm({ title: '', category: 'tent', description: '', rate: '', unitType: 'Per Day', inventoryList: [], images: [], contactNumber: '', _id: '', upiId: '', variant: 'Simple', blockedDates: [] });
                           setView('my-services'); 
-                      }} className="bg-[#fb641b] text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase">Add Service</button>
+                      }} className="bg-[#fb641b] text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase">Add New</button>
                   </div>
                   <div className="space-y-4">
                       {myServices.map(s => (
@@ -469,7 +443,7 @@ const App: React.FC = () => {
                               </div>
                               <div className="flex gap-2">
                                   <button onClick={() => { setServiceForm(s); setView('my-services'); }} className="text-blue-500 p-2"><i className="fas fa-edit"></i></button>
-                                  <button onClick={async () => { if(window.confirm("Delete?")) await fetch(`${API_BASE_URL}/services/${s._id}`, {method: 'DELETE'}); fetchMyServices(); }} className="text-red-400 p-2"><i className="fas fa-trash-alt"></i></button>
+                                  <button onClick={async () => { if(window.confirm("Remove?")) await fetch(`${API_BASE_URL}/services/${s._id}`, {method: 'DELETE'}); fetchMyServices(); }} className="text-red-400 p-2"><i className="fas fa-trash-alt"></i></button>
                               </div>
                           </div>
                       ))}
@@ -480,29 +454,33 @@ const App: React.FC = () => {
 
         {view === 'my-services' && (
            <div className="bg-white p-6 rounded-[2.5rem] shadow-sm animate-slideIn">
-              <h3 className="text-sm font-black text-[#2874f0] uppercase mb-8 tracking-widest text-center border-b pb-4">Seller Service Editor</h3>
+              <h3 className="text-sm font-black text-[#2874f0] uppercase mb-8 tracking-widest text-center border-b pb-4">Service Editor</h3>
               <form onSubmit={handleAddOrUpdateService} className="space-y-6">
                  <div className="bg-blue-50/50 p-6 rounded-[2rem] border-2 border-dashed border-blue-200">
-                    <input type="file" multiple className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
+                    <input type="file" multiple className="hidden" ref={fileInputRef} onChange={(e) => {
+                       const files = e.target.files; if(!files) return;
+                       Array.from(files).forEach(f => {
+                         const r = new FileReader();
+                         r.onloadend = () => setServiceForm(p => ({...p, images: [...p.images, r.result as string].slice(0, 5)}));
+                         r.readAsDataURL(f);
+                       });
+                    }} />
                     <div className="flex flex-wrap gap-2">
                        {serviceForm.images.map((img, i) => (
-                          <div key={i} className="relative w-14 h-14 shadow-lg"><img src={img} className="w-full h-full object-cover rounded-xl" /><button type="button" onClick={() => removeImage(i)} className="absolute -top-1 -right-1 bg-red-500 text-white w-4 h-4 rounded-full text-[8px]"><i className="fas fa-times"></i></button></div>
+                          <div key={i} className="relative w-14 h-14"><img src={img} className="w-full h-full object-cover rounded-xl" /><button type="button" onClick={() => setServiceForm(p=>({...p, images: p.images.filter((_,idx)=>idx!==i)}))} className="absolute -top-1 -right-1 bg-red-500 text-white w-4 h-4 rounded-full text-[8px]"><i className="fas fa-times"></i></button></div>
                        ))}
                        {serviceForm.images.length < 5 && (
                           <button type="button" onClick={() => fileInputRef.current?.click()} className="w-14 h-14 rounded-xl bg-white border border-blue-200 text-blue-400 flex items-center justify-center"><i className="fas fa-camera"></i></button>
                        )}
                     </div>
                  </div>
-
-                 <input placeholder="Service Title" className="w-full bg-gray-50 p-4 rounded-xl font-bold shadow-inner" value={serviceForm.title} onChange={e => setServiceForm({...serviceForm, title: e.target.value})} required />
-                 
+                 <input placeholder="Title" className="w-full bg-gray-50 p-4 rounded-xl font-bold" value={serviceForm.title} onChange={e => setServiceForm({...serviceForm, title: e.target.value})} required />
                  <div className="grid grid-cols-2 gap-4">
-                    <input placeholder="Rate (₹)" type="number" className="w-full bg-gray-50 p-4 rounded-xl font-bold shadow-inner" value={serviceForm.rate} onChange={e => setServiceForm({...serviceForm, rate: e.target.value})} required />
-                    <input placeholder="Phone" className="w-full bg-gray-50 p-4 rounded-xl font-bold shadow-inner" value={serviceForm.contactNumber} onChange={e => setServiceForm({...serviceForm, contactNumber: e.target.value})} required />
+                    <input placeholder="Price (₹)" type="number" className="w-full bg-gray-50 p-4 rounded-xl font-bold" value={serviceForm.rate} onChange={e => setServiceForm({...serviceForm, rate: e.target.value})} required />
+                    <input placeholder="Phone" className="w-full bg-gray-50 p-4 rounded-xl font-bold" value={serviceForm.contactNumber} onChange={e => setServiceForm({...serviceForm, contactNumber: e.target.value})} required />
                  </div>
-
                  <div className="space-y-2">
-                    <p className="text-[9px] font-black text-gray-400 uppercase ml-2">Block Dates (Unavailable)</p>
+                    <p className="text-[9px] font-black text-gray-400 uppercase ml-2">Block Service Calendar</p>
                     <input type="date" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-bold" onChange={(e) => {
                         if (e.target.value && !serviceForm.blockedDates.includes(e.target.value)) {
                             setServiceForm({...serviceForm, blockedDates: [...serviceForm.blockedDates, e.target.value]});
@@ -516,16 +494,15 @@ const App: React.FC = () => {
                         ))}
                     </div>
                  </div>
-
-                 <textarea placeholder="Description & Specs..." className="w-full bg-gray-50 p-5 rounded-xl h-32 text-xs font-bold shadow-inner" value={serviceForm.description} onChange={e => setServiceForm({...serviceForm, description: e.target.value})} />
-                 <button type="submit" className="w-full bg-[#fb641b] text-white py-5 rounded-2xl font-black uppercase tracking-widest shadow-xl">Save Listing</button>
+                 <textarea placeholder="Full Description..." className="w-full bg-gray-50 p-5 rounded-xl h-32 text-xs font-bold" value={serviceForm.description} onChange={e => setServiceForm({...serviceForm, description: e.target.value})} />
+                 <button type="submit" className="w-full bg-[#fb641b] text-white py-5 rounded-2xl font-black uppercase tracking-widest shadow-xl">Go Live</button>
               </form>
            </div>
         )}
 
         {view === 'bookings' && (
            <div className="space-y-6">
-               <h2 className="text-xl font-black text-gray-800 border-l-8 border-[#fb641b] pl-4 mb-6 uppercase tracking-tighter">Orders & Progress</h2>
+               <h2 className="text-xl font-black text-gray-800 border-l-8 border-[#fb641b] pl-4 mb-6 uppercase tracking-tighter">My Orders</h2>
                {bookings.map(b => (
                   <div key={b._id} className="bg-white p-6 rounded-[2.5rem] shadow-sm mb-6 border border-gray-50">
                       <div className="flex justify-between items-start mb-6">
@@ -533,20 +510,41 @@ const App: React.FC = () => {
                               <p className="text-[9px] font-black text-[#2874f0] uppercase tracking-widest mb-1">{b.serviceId?.title}</p>
                               <h4 className="font-black text-gray-800">{user.role === 'vendor' ? b.customerId?.name : b.vendorId?.businessName}</h4>
                           </div>
-                          <span className={`text-[8px] font-black uppercase px-3 py-1 rounded-full ${b.status === 'completed' ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>{b.status}</span>
+                          <span className={`text-[8px] font-black uppercase px-3 py-1 rounded-full ${b.status === 'completed' ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>{b.status.replace('_',' ')}</span>
                       </div>
                       <Stepper status={b.status} />
 
-                      {/* Payment & OTP Actions */}
-                      <div className="mt-4">
-                          {user.role === 'user' && b.status === 'approved' && (
-                              <button onClick={() => proofInputRef.current?.click()} className="w-full bg-[#2874f0] text-white py-4 rounded-xl text-[10px] font-black uppercase">Pay Advance (10%) & Upload Proof</button>
+                      <div className="mt-4 space-y-2">
+                          {user.role === 'user' && (
+                              <>
+                                {b.status === 'approved' && (
+                                    <button onClick={() => proofInputRef.current?.click()} className="w-full bg-[#2874f0] text-white py-4 rounded-xl text-[10px] font-black uppercase">Pay Advance (10%) & Screenshot</button>
+                                )}
+                                {b.status === 'advance_paid' && (
+                                    <button onClick={() => finalProofInputRef.current?.click()} className="w-full bg-[#fb641b] text-white py-4 rounded-xl text-[10px] font-black uppercase">Upload Final Bill Proof</button>
+                                )}
+                                {b.status === 'final_paid' && (
+                                    <div className="bg-green-50 p-4 rounded-2xl text-center border-2 border-dashed border-green-200">
+                                        <p className="text-[9px] font-black text-green-700 uppercase mb-2">Service Completion OTP</p>
+                                        <h3 className="text-3xl font-black text-green-600 tracking-[0.5rem]">{b.otp}</h3>
+                                    </div>
+                                )}
+                                {b.status === 'completed' && !b.review?.rating && (
+                                    <button onClick={() => setReviewTarget(b)} className="w-full bg-green-500 text-white py-4 rounded-xl text-[10px] font-black uppercase">Rate this Service</button>
+                                )}
+                              </>
                           )}
-                          {user.role === 'user' && b.status === 'completed' && !b.review?.rating && (
-                              <button onClick={() => setReviewTarget(b)} className="w-full bg-green-100 text-green-600 py-4 rounded-xl text-[10px] font-black uppercase">Rate this Service</button>
-                          )}
-                          {user.role === 'vendor' && b.status === 'final_paid' && (
-                              <button onClick={() => setOtpTarget({ id: b._id, code: '', correctCode: b.otp })} className="w-full bg-green-600 text-white py-4 rounded-xl text-[10px] font-black uppercase">Verify Job Completion OTP</button>
+
+                          {user.role === 'vendor' && (
+                              <>
+                                {b.status === 'pending' && <button onClick={() => updateBookingStatus(b._id, {status: 'approved'})} className="w-full bg-green-500 text-white py-4 rounded-xl text-[10px] font-black uppercase">Confirm Order</button>}
+                                {b.status === 'awaiting_advance_verification' && (
+                                    <button onClick={() => setScreenshotPreview(b.advanceProof)} className="w-full bg-blue-50 text-blue-600 py-3 rounded-xl text-[10px] font-black uppercase">Verify Advance Screenshot</button>
+                                )}
+                                {b.status === 'final_paid' && (
+                                    <button onClick={() => setOtpTarget({ id: b._id, code: '', correctCode: b.otp })} className="w-full bg-green-600 text-white py-4 rounded-xl text-[10px] font-black uppercase">Enter Job Done OTP</button>
+                                )}
+                              </>
                           )}
                       </div>
                   </div>
@@ -555,26 +553,42 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {/* --- Details Modal --- */}
+      {/* RECOVERY: Restored Full Booking Form (Address, Pincode) */}
+      {bookingTarget && (
+        <div className="fixed inset-0 bg-black/60 z-[400] flex items-center justify-center p-6 backdrop-blur-sm overflow-y-auto">
+           <div className="bg-white w-full rounded-[2.5rem] p-10 animate-slideUp shadow-2xl">
+              <h2 className="text-xl font-black uppercase mb-8">Booking Details</h2>
+              <form onSubmit={handleBooking} className="space-y-6">
+                 <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1"><p className="text-[8px] font-black text-gray-400 uppercase">Start</p><input type="date" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-black" required onChange={e => setBookingForm({...bookingForm, startDate: e.target.value})} /></div>
+                    <div className="space-y-1"><p className="text-[8px] font-black text-gray-400 uppercase">End</p><input type="date" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-black" required onChange={e => setBookingForm({...bookingForm, endDate: e.target.value})} /></div>
+                 </div>
+                 <textarea placeholder="Detailed Event Address..." className="w-full bg-gray-50 p-5 rounded-xl text-xs font-black h-24" required onChange={e => setBookingForm({...bookingForm, address: e.target.value})} />
+                 <div className="grid grid-cols-2 gap-4">
+                    <input placeholder="Pincode" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-black" required onChange={e => setBookingForm({...bookingForm, pincode: e.target.value})} />
+                    <input placeholder="Alt Mobile" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-black" onChange={e => setBookingForm({...bookingForm, altMobile: e.target.value})} />
+                 </div>
+                 <button type="submit" className="w-full bg-[#fb641b] text-white py-6 rounded-2xl font-black uppercase text-xs shadow-2xl tracking-widest">Confirm Booking</button>
+              </form>
+              <button onClick={() => setBookingTarget(null)} className="w-full text-gray-400 mt-4 text-[10px] font-black uppercase">Close</button>
+           </div>
+        </div>
+      )}
+
+      {/* Other Modals (Detail, Rating, Screenshot, OTP) */}
       {detailTarget && (
-          <div className="fixed inset-0 bg-black/95 z-[500] overflow-y-auto no-scrollbar">
-              <div className="max-w-md mx-auto min-h-screen bg-white relative animate-slideUp pb-32">
-                  <button onClick={() => setDetailTarget(null)} className="absolute top-6 left-6 z-[510] bg-black/20 text-white w-10 h-10 rounded-full"><i className="fas fa-arrow-left"></i></button>
+          <div className="fixed inset-0 bg-black/95 z-[500] overflow-y-auto">
+              <div className="max-w-md mx-auto min-h-screen bg-white relative pb-32">
+                  <button onClick={() => setDetailTarget(null)} className="absolute top-6 left-6 z-[510] text-white w-10 h-10 bg-black/30 rounded-full"><i className="fas fa-arrow-left"></i></button>
                   <img src={detailTarget.images[activeImageIdx]} className="h-[40vh] w-full object-cover" />
                   <div className="p-8 space-y-6">
                       <h1 className="text-2xl font-black text-gray-800 uppercase tracking-tighter">{detailTarget.title}</h1>
-                      <div className="flex items-center gap-4 py-4 border-y border-gray-50">
-                          <p className="text-3xl font-black text-gray-900 italic">₹{detailTarget.rate}/-</p>
-                          <span className="text-[10px] font-black bg-green-500 text-white px-2 py-1 rounded">LOCAL VERIFIED</span>
-                      </div>
+                      <p className="text-3xl font-black text-gray-900 italic">₹{detailTarget.rate}/-</p>
                       <div className="bg-gray-50 p-6 rounded-[2rem]">
-                          <h4 className="font-black text-[10px] uppercase mb-4 tracking-widest text-gray-400">Specifications</h4>
                           <p className="text-xs font-bold text-gray-600 leading-relaxed">{detailTarget.description}</p>
                       </div>
-                      
-                      {/* Reviews Section */}
                       <div className="space-y-4">
-                          <h4 className="font-black text-[10px] uppercase tracking-widest text-gray-400">Customer Reviews</h4>
+                          <h4 className="font-black text-[10px] uppercase tracking-widest text-gray-400">Reviews</h4>
                           {bookings.filter(b => b.serviceId?._id === detailTarget._id && b.review?.rating).map(b => (
                               <div key={b._id} className="p-4 bg-gray-50 rounded-2xl border border-gray-100">
                                   <div className="flex items-center gap-2 mb-2">
@@ -594,11 +608,10 @@ const App: React.FC = () => {
           </div>
       )}
 
-      {/* --- Review Modal --- */}
       {reviewTarget && (
           <div className="fixed inset-0 bg-black/60 z-[600] flex items-center justify-center p-6 backdrop-blur-sm">
               <div className="bg-white w-full rounded-[2.5rem] p-10 animate-slideUp">
-                  <h2 className="text-xl font-black text-gray-800 mb-6 uppercase text-center">Rate Your Experience</h2>
+                  <h2 className="text-xl font-black text-gray-800 mb-6 uppercase text-center">Rate the Experience</h2>
                   <form onSubmit={handleReviewSubmit} className="space-y-6">
                       <div className="flex justify-center gap-4">
                           {[1,2,3,4,5].map(star => (
@@ -612,22 +625,26 @@ const App: React.FC = () => {
           </div>
       )}
 
-      {/* Booking Form Modal */}
-      {bookingTarget && (
-        <div className="fixed inset-0 bg-black/60 z-[400] flex items-center justify-center p-6 backdrop-blur-sm overflow-y-auto">
-           <div className="bg-white w-full rounded-[2.5rem] p-10 animate-slideUp shadow-2xl">
-              <h2 className="text-xl font-black uppercase mb-8">Event Dates</h2>
-              <form onSubmit={handleBooking} className="space-y-6">
-                 <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1"><p className="text-[8px] font-black text-gray-400 uppercase">Start Date</p><input type="date" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-black shadow-inner" required onChange={e => setBookingForm({...bookingForm, startDate: e.target.value})} /></div>
-                    <div className="space-y-1"><p className="text-[8px] font-black text-gray-400 uppercase">End Date</p><input type="date" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-black shadow-inner" required onChange={e => setBookingForm({...bookingForm, endDate: e.target.value})} /></div>
-                 </div>
-                 <textarea placeholder="Event Address..." className="w-full bg-gray-50 p-5 rounded-xl text-xs font-black h-28 shadow-inner" required onChange={e => setBookingForm({...bookingForm, address: e.target.value})} />
-                 <button type="submit" className="w-full bg-[#fb641b] text-white py-6 rounded-2xl font-black uppercase text-xs shadow-2xl">Send Request</button>
-              </form>
-              <button onClick={() => setBookingTarget(null)} className="w-full text-gray-400 mt-4 text-[10px] font-black uppercase">Cancel</button>
+      {otpTarget && (
+        <div className="fixed inset-0 bg-black/60 z-[600] flex items-center justify-center p-6 backdrop-blur-sm">
+           <div className="bg-white w-full rounded-[2.5rem] p-10 animate-slideUp text-center">
+              <h2 className="text-xl font-black text-gray-800 mb-4 uppercase">Verify Job Completion</h2>
+              <input type="text" maxLength={4} className="w-full bg-gray-100 p-6 rounded-2xl text-4xl font-black text-center tracking-[1rem] outline-none shadow-inner mb-8" value={otpTarget.code} onChange={(e) => setOtpTarget({...otpTarget, code: e.target.value})} />
+              <button onClick={() => {
+                  if (otpTarget.code === otpTarget.correctCode) {
+                      updateBookingStatus(otpTarget.id, { status: 'completed' });
+                      alert("Success!");
+                      setOtpTarget(null);
+                  } else alert("Wrong OTP!");
+              }} className="w-full bg-green-500 text-white py-4 rounded-xl text-[10px] font-black uppercase shadow-xl">Confirm Delivery</button>
            </div>
         </div>
+      )}
+
+      {screenshotPreview && (
+          <div className="fixed inset-0 bg-black/95 z-[700] flex items-center justify-center p-6" onClick={() => setScreenshotPreview(null)}>
+              <img src={screenshotPreview} className="w-full max-w-sm rounded-[2rem] shadow-2xl border-4 border-white" />
+          </div>
       )}
 
       {/* Nav Bar */}
@@ -640,8 +657,8 @@ const App: React.FC = () => {
         <button onClick={handleLogout} className="text-red-300 flex flex-col items-center gap-2"><i className="fas fa-power-off text-xl"></i><span className="text-[8px] font-black uppercase">Logout</span></button>
       </nav>
 
-      {/* Hidden Inputs for Proof */}
-      <input type="file" className="hidden" ref={proofInputRef} onChange={(e) => handleProofUpload(e, bookings.find(b => b.status === 'approved')?._id, 'advanceProof')} />
+      <input type="file" className="hidden" ref={proofInputRef} onChange={(e) => handleProofUpload(e, bookings.find(b=>b.status==='approved')?._id, 'advanceProof')} />
+      <input type="file" className="hidden" ref={finalProofInputRef} onChange={(e) => handleProofUpload(e, bookings.find(b=>b.status==='advance_paid')?._id, 'finalProof')} />
 
       <style>{`
         @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }

@@ -72,8 +72,6 @@ const Booking = mongoose.models.Booking || mongoose.model('Booking', BookingSche
 app.post('/api/register', async (req, res) => {
   try {
     const { name, email, mobile, password, role, location } = req.body;
-    const existing = await User.findOne({ mobile });
-    if (existing) return res.status(400).json({ error: "Already registered" });
     const user = new User({ name, email, mobile, password, role, location });
     await user.save();
     if (role === 'vendor') {
@@ -160,7 +158,6 @@ app.patch('/api/bookings/:id/status', async (req, res) => {
     const booking = await Booking.findByIdAndUpdate(req.params.id, req.body, { new: true });
     if (req.body.status === 'completed') {
       await Vendor.findByIdAndUpdate(booking.vendorId, { $inc: { totalEarnings: booking.totalAmount } });
-      // Auto-block the dates on service when completed
       await Service.findByIdAndUpdate(booking.serviceId, { $addToSet: { blockedDates: booking.startDate.toISOString().split('T')[0] } });
     }
     res.json(booking);
