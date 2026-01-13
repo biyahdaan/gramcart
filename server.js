@@ -7,7 +7,6 @@ const jwt = require('jsonwebtoken');
 const app = express();
 
 // --- MIDDLEWARE ---
-// CORS को पूरी तरह ओपन किया गया है ताकि किसी भी डोमेन से फ्रंटएंड कनेक्ट हो सके
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
@@ -19,13 +18,16 @@ app.use(express.json());
 const MONGO_URI = process.env.MONGODB_URI || "mongodb+srv://biyahdaan_db_user:cUzpl0anIuBNuXb9@cluster0.hf1vhp3.mongodb.net/gramcart_db?retryWrites=true&w=majority";
 
 mongoose.connect(MONGO_URI)
-  .then(() => console.log("🚀 GramCart Scalable Engine Online"))
-  .catch(err => console.error("❌ DB Connection Error:", err));
+  .then(() => console.log("🚀 GramCart Engine Online"))
+  .catch(err => console.error("❌ DB Error:", err));
 
 // --- SCHEMAS ---
+
+// Extended User Schema with Mobile support
 const User = mongoose.models.User || mongoose.model('User', new mongoose.Schema({
   name: { type: String, required: true },
-  email: { type: String, unique: true, index: true },
+  email: { type: String, unique: true, sparse: true, index: true }, // sparse allows nulls but keeps uniqueness for values
+  mobile: { type: String, unique: true, required: true, index: true },
   password: { type: String, required: true },
   role: { type: String, enum: ['user', 'vendor'], default: 'user' }
 }));
@@ -37,32 +39,36 @@ const Vendor = mongoose.models.Vendor || mongoose.model('Vendor', new mongoose.S
   isVerified: { type: Boolean, default: false }
 }));
 
+// Extended Service Schema for Inventory
 const Service = mongoose.models.Service || mongoose.model('Service', new mongoose.Schema({
   vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor', index: true },
   category: { type: String, index: true },
   title: String,
-  pricePerDay: Number
+  unitType: { type: String, enum: ['Per Day', 'Per Piece', 'Per Sq Ft', 'Per Meter'], default: 'Per Day' },
+  rate: { type: Number, required: true },
+  itemsIncluded: [String],
+  duration: { type: String, default: '1 Day' },
+  createdAt: { type: Date, default: Date.now }
 }));
 
 // --- ROUTES ---
 
-// 1. Root Route Fix: Render par "Cannot GET /" को ठीक करने के लिए
 app.get('/', (req, res) => {
-  res.json({ 
-    status: "GramCart API is Running",
-    version: "1.0.0",
-    environment: process.env.NODE_ENV || "development"
-  });
+  res.json({ status: "GramCart API Running", features: ["Dual Auth", "Inventory Management"] });
 });
 
-// 2. Auth: Register
+// Dual Auth: Register (Supports Email & Mobile)
 app.post('/api/register', async (req, res) => {
   try {
-    const { name, email, password, role } = req.body;
-    const existing = await User.findOne({ email });
-    if (existing) return res.status(400).json({ error: "Email already registered" });
+    const { name, email, mobile, password, role } = req.body;
+    
+    // Check for existing users to prevent E11000 errors gracefully
+    const existing = await User.findOne({ $or: [{ email }, { mobile }] });
+    if (existing) {
+      return res.status(400).json({ error: "Email or Mobile already registered" });
+    }
 
-    const user = new User({ name, email, password, role });
+    const user = new User({ name, email, mobile, password, role });
     await user.save();
 
     if (role === 'vendor') {
@@ -77,11 +83,15 @@ app.post('/api/register', async (req, res) => {
   }
 });
 
-// 3. Auth: Login
+// Dual Auth: Login (Email OR Mobile)
 app.post('/api/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
-    const user = await User.findOne({ email, password });
+    const { identifier, password } = req.body; // 'identifier' can be email or mobile
+    const user = await User.findOne({ 
+      $or: [{ email: identifier }, { mobile: identifier }], 
+      password 
+    });
+    
     if (!user) return res.status(401).json({ error: "Invalid credentials" });
 
     const token = jwt.sign({ id: user._id }, 'GRAM_SECRET_KEY');
@@ -91,7 +101,26 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// 4. Search Vendors
+// Vendor: Add Detailed Service
+app.post('/api/services', async (req, res) => {
+  try {
+    const { vendorId, category, title, unitType, rate, itemsIncluded, duration } = req.body;
+    const service = new Service({ 
+      vendorId, 
+      category, 
+      title, 
+      unitType, 
+      rate, 
+      itemsIncluded, 
+      duration 
+    });
+    await service.save();
+    res.status(201).json(service);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to add service" });
+  }
+});
+
 app.get('/api/search', async (req, res) => {
   try {
     const { cat } = req.query;
@@ -111,14 +140,5 @@ app.get('/api/search', async (req, res) => {
   }
 });
 
-// --- SERVER START ---
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`
-  ******************************************
-  ✅ Server is active on port ${PORT}
-  🔗 Local: http://localhost:${PORT}
-  🌍 Health Check: http://localhost:${PORT}/
-  ******************************************
-  `);
-});
+app.listen(PORT, () => console.log(`Server running on ${PORT}`));
