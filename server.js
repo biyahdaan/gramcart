@@ -110,13 +110,6 @@ app.get('/api/my-services/:vendorId', async (req, res) => {
   } catch (err) { res.status(500).json({ error: "Fetch error" }); }
 });
 
-app.put('/api/services/:id', async (req, res) => {
-  try {
-    const service = await Service.findByIdAndUpdate(req.params.id, req.body, { new: true });
-    res.json(service);
-  } catch (err) { res.status(500).json({ error: "Update failed" }); }
-});
-
 app.get('/api/search', async (req, res) => {
   try {
     const { cat } = req.query;
@@ -140,9 +133,20 @@ app.post('/api/bookings', async (req, res) => {
   } catch (err) { res.status(500).json({ error: "Booking error" }); }
 });
 
+// GET Bookings for specific user/vendor
 app.get('/api/my-bookings/:role/:id', async (req, res) => {
   try {
-    const query = req.params.role === 'vendor' ? { vendorId: req.params.id } : { customerId: req.params.id };
+    const { role, id } = req.params;
+    let query = {};
+    
+    if (role === 'vendor') {
+        // If ID is userId, find the vendorId first
+        const vendorDoc = await Vendor.findOne({ userId: id });
+        query = { vendorId: vendorDoc ? vendorDoc._id : id };
+    } else {
+        query = { customerId: id };
+    }
+
     const bookings = await Booking.find(query)
       .populate('customerId', 'name mobile')
       .populate('serviceId')
@@ -152,7 +156,6 @@ app.get('/api/my-bookings/:role/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: "Booking fetch error" }); }
 });
 
-// NEW: Update Booking Status (Approve/Reject)
 app.patch('/api/bookings/:id/status', async (req, res) => {
   try {
     const { status } = req.body;
@@ -166,4 +169,4 @@ app.patch('/api/bookings/:id/status', async (req, res) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 GramCart v3 Server running on ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 GramCart v4 Server running on ${PORT}`));
