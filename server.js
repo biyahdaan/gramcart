@@ -22,7 +22,10 @@ const UserSchema = new mongoose.Schema({
   mobile: { type: String, unique: true, required: true, index: true },
   password: { type: String, required: true },
   role: { type: String, enum: ['user', 'vendor'], default: 'user' },
-  location: { lat: Number, lng: Number } 
+  location: { lat: Number, lng: Number },
+  savedAddress: String,
+  savedPincode: String,
+  savedAltMobile: String
 });
 const User = mongoose.models.User || mongoose.model('User', UserSchema);
 
@@ -46,6 +49,7 @@ const ServiceSchema = new mongoose.Schema({
   itemsIncluded: [String],
   images: [String],
   contactNumber: { type: String, required: true },
+  upiId: { type: String }, // Per-service UPI ID override
   createdAt: { type: Date, default: Date.now }
 });
 const Service = mongoose.models.Service || mongoose.model('Service', ServiceSchema);
@@ -57,6 +61,8 @@ const BookingSchema = new mongoose.Schema({
   startDate: Date,
   endDate: Date,
   address: String,
+  pincode: String,
+  altMobile: String,
   totalAmount: Number,
   advanceProof: String,
   otp: { type: String, required: true }, 
@@ -64,6 +70,10 @@ const BookingSchema = new mongoose.Schema({
     type: String, 
     enum: ['pending', 'approved', 'advance_paid', 'completed', 'rejected'], 
     default: 'pending' 
+  },
+  review: {
+      rating: Number,
+      comment: String
   },
   createdAt: { type: Date, default: Date.now }
 });
@@ -75,15 +85,14 @@ app.post('/api/register', async (req, res) => {
   try {
     const { name, email, mobile, password, role, location } = req.body;
     const existing = await User.findOne({ $or: [{ email }, { mobile }] });
-    if (existing) return res.status(400).json({ error: "Mobile/Email already registered" });
+    if (existing) return res.status(400).json({ error: "Mobile/Email registered" });
     const user = new User({ name, email, mobile, password, role, location });
     await user.save();
     if (role === 'vendor') {
       const vendor = new Vendor({ userId: user._id, businessName: `${name}'s Shop`, location });
       await vendor.save();
     }
-    const token = jwt.sign({ id: user._id }, 'GRAM_SECRET');
-    res.status(201).json({ token, user });
+    res.status(201).json({ user });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

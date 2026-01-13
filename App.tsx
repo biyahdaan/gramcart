@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Language, User, Translations, UserRole, Translation } from './types';
-import { CATEGORIES, BANNERS } from './constants';
+import { CATEGORIES as INITIAL_CATEGORIES, BANNERS } from './constants';
 import { LanguageSwitch } from './components/LanguageSwitch';
 
 const API_BASE_URL = "https://biyahdaan.onrender.com/api"; 
@@ -18,7 +18,7 @@ const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [vendorProfile, setVendorProfile] = useState<any>(null);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
-  const [view, setView] = useState<'home' | 'vendor-dashboard' | 'bookings' | 'my-services' | 'vendor-settings'>('home');
+  const [view, setView] = useState<'home' | 'vendor-dashboard' | 'bookings' | 'my-services' | 'profile'>('home');
   const [data, setData] = useState<any[]>([]);
   const [bookings, setBookings] = useState<any[]>([]);
   const [myServices, setMyServices] = useState<any[]>([]);
@@ -27,17 +27,21 @@ const App: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [isListening, setIsListening] = useState(false);
   const [userCoords, setUserCoords] = useState<{lat: number, lng: number} | null>(null);
+  const [categories, setCategories] = useState(INITIAL_CATEGORIES);
   
   const [bookingTarget, setBookingTarget] = useState<any>(null);
   const [detailTarget, setDetailTarget] = useState<any>(null); 
   const [otpTarget, setOtpTarget] = useState<{id: string, code: string, correctCode: string} | null>(null);
+  const [reviewTarget, setReviewTarget] = useState<any>(null);
   
   const [authForm, setAuthForm] = useState({ identifier: '', email: '', mobile: '', password: '', name: '', role: 'user' });
   const [serviceForm, setServiceForm] = useState({
     title: '', category: 'tent', description: '', rate: '', unitType: 'Per Day', 
-    itemsIncluded: [] as string[], images: [] as string[], contactNumber: '', _id: '', customItem: ''
+    itemsIncluded: [] as string[], images: [] as string[], contactNumber: '', _id: '', customItem: '', 
+    customCategory: '', upiId: '' 
   });
-  const [bookingForm, setBookingForm] = useState({ startDate: '', endDate: '', address: '' });
+  const [bookingForm, setBookingForm] = useState({ startDate: '', endDate: '', address: '', pincode: '', altMobile: '' });
+  const [reviewForm, setReviewForm] = useState({ rating: 5, comment: '' });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const proofInputRef = useRef<HTMLInputElement>(null);
@@ -70,6 +74,13 @@ const App: React.FC = () => {
       try {
         const parsedUser = JSON.parse(saved);
         setUser(parsedUser);
+        // Pre-fill booking form with saved address info
+        setBookingForm(prev => ({
+            ...prev,
+            address: parsedUser.savedAddress || '',
+            pincode: parsedUser.savedPincode || '',
+            altMobile: parsedUser.savedAltMobile || ''
+        }));
         if (parsedUser?.role === 'vendor') {
             setView('vendor-dashboard');
             fetchVendorProfile(parsedUser._id || parsedUser.id);
@@ -167,28 +178,37 @@ const App: React.FC = () => {
   const handleAddOrUpdateService = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return alert("Please login");
-    setLoading(true); setPublishStatus('Compressing Photos...');
+    setLoading(true); setPublishStatus('Processing...');
     try {
       const compressedImages = await Promise.all(serviceForm.images.map(img => img.startsWith('data:image') ? compressImage(img) : img));
-      setPublishStatus('Syncing Vendor...');
+      
       const vRes = await fetch(`${API_BASE_URL}/search`);
       const allV = await vRes.json();
       const v = allV.find((vend: any) => vend.userId === (user._id || user.id));
       if (!v) throw new Error("Vendor missing");
-      setPublishStatus('Uploading Details...');
+      
+      // Handle New Category Creation
+      let finalCategory = serviceForm.category;
+      if (serviceForm.category === 'other' && serviceForm.customCategory) {
+          finalCategory = serviceForm.customCategory.toLowerCase().replace(/\s+/g, '_');
+          setCategories(prev => [...prev, { id: finalCategory, name: serviceForm.customCategory, icon: 'fa-plus', color: 'bg-green-100 text-green-600' }]);
+      }
+
       const isUpdating = !!serviceForm._id && serviceForm._id.length > 0;
       const payload = {
-        title: serviceForm.title, category: serviceForm.category, description: serviceForm.description,
+        title: serviceForm.title, category: finalCategory, description: serviceForm.description,
         rate: Number(serviceForm.rate), unitType: serviceForm.unitType, itemsIncluded: serviceForm.itemsIncluded,
-        images: compressedImages, contactNumber: serviceForm.contactNumber, vendorId: v._id
+        images: compressedImages, contactNumber: serviceForm.contactNumber, vendorId: v._id,
+        upiId: serviceForm.upiId || v.upiId // Use per-service UPI if provided
       };
+      
       const method = isUpdating ? 'PUT' : 'POST';
       const endpoint = isUpdating ? `/services/${serviceForm._id}` : '/services';
       const res = await fetch(`${API_BASE_URL}${endpoint}`, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (res.ok) {
         setPublishStatus('Success!');
         setTimeout(() => {
-          setServiceForm({ title: '', category: 'tent', description: '', rate: '', unitType: 'Per Day', itemsIncluded: [], images: [], contactNumber: '', _id: '', customItem: '' });
+          setServiceForm({ title: '', category: 'tent', description: '', rate: '', unitType: 'Per Day', itemsIncluded: [], images: [], contactNumber: '', _id: '', customItem: '', customCategory: '', upiId: '' });
           setPublishStatus(''); fetchMyServices(); fetchData(); setView('my-services'); setLoading(false);
         }, 1200);
       } else alert("Error publishing");
@@ -224,6 +244,12 @@ const App: React.FC = () => {
         const v = allV.find((vend: any) => vend.services.some((s: any) => s._id === bookingTarget._id));
         const diff = new Date(bookingForm.endDate).getTime() - new Date(bookingForm.startDate).getTime();
         const days = Math.max(1, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+        
+        // Update user profile with latest address for future bookings
+        const updatedUser = { ...user, savedAddress: bookingForm.address, savedPincode: bookingForm.pincode, savedAltMobile: bookingForm.altMobile };
+        localStorage.setItem('gramcart_user', JSON.stringify(updatedUser));
+        setUser(updatedUser);
+
         const res = await fetch(`${API_BASE_URL}/bookings`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -238,6 +264,24 @@ const App: React.FC = () => {
         });
         if (res.ok) { setBookingTarget(null); setView('bookings'); fetchBookings(); } else alert("Booking failed");
     } catch (e) { alert("Server error"); } finally { setLoading(false); }
+  };
+
+  const handleReview = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!user || !reviewTarget) return;
+      setLoading(true);
+      try {
+          const res = await fetch(`${API_BASE_URL}/bookings/${reviewTarget._id}/status`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ review: reviewForm, status: 'completed' })
+          });
+          if (res.ok) {
+              setReviewTarget(null);
+              fetchBookings();
+              alert("Review Shared!");
+          }
+      } catch (e) { alert("Error submitting review"); } finally { setLoading(false); }
   };
 
   const updateBookingStatus = async (bookingId: string, payload: any) => {
@@ -305,11 +349,11 @@ const App: React.FC = () => {
   if (!user) {
     return (
       <div className="max-w-md mx-auto min-h-screen bg-[#2874f0] flex items-center justify-center p-6">
-        <div className="bg-white w-full p-8 rounded-[2rem] shadow-2xl">
+        <div className="bg-white w-full p-8 rounded-[2rem] shadow-2xl animate-slideUp">
           <div className="text-center mb-8"><h1 className="text-4xl font-black text-[#2874f0] italic">GramCart</h1></div>
           <form onSubmit={handleAuth} className="space-y-4">
             {authMode === 'register' && (
-              <><input placeholder="Name" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" onChange={e => setAuthForm({...authForm, name: e.target.value})} required /><input placeholder="Mobile Number" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" onChange={e => setAuthForm({...authForm, mobile: e.target.value})} required /></>
+              <><input placeholder="Shop Name / Person Name" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" onChange={e => setAuthForm({...authForm, name: e.target.value})} required /><input placeholder="Mobile Number" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" onChange={e => setAuthForm({...authForm, mobile: e.target.value})} required /></>
             )}
             <input placeholder="Email or Mobile" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" onChange={e => setAuthForm({...authForm, identifier: e.target.value})} required />
             <input placeholder="Password" type="password" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" onChange={e => setAuthForm({...authForm, password: e.target.value})} required />
@@ -353,7 +397,7 @@ const App: React.FC = () => {
         {view === 'home' && (
           <div className="space-y-6">
             <div className="flex gap-4 overflow-x-auto no-scrollbar py-2">
-                {CATEGORIES.map(c => (
+                {categories.map(c => (
                     <button key={c.id} onClick={() => fetchData(c.id)} className="flex flex-col items-center gap-2 min-w-[85px]">
                         <div className={`w-16 h-16 rounded-3xl ${c.color} flex items-center justify-center shadow-md border-4 border-white`}><i className={`fas ${c.icon} text-xl`}></i></div>
                         <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">{c.name}</span>
@@ -377,7 +421,7 @@ const App: React.FC = () => {
                         <p className="text-[#2874f0] font-black text-sm">₹{s.rate}/- <span className="text-[8px] text-gray-400 font-bold uppercase">{s.unitType}</span></p>
                         <div className="flex gap-2 mt-4">
                            <button onClick={() => setDetailTarget(s)} className="flex-1 bg-white border border-gray-200 text-gray-400 text-[9px] font-black py-2.5 rounded-xl">Details</button>
-                           <button onClick={() => { setBookingTarget(s); setBookingForm({ startDate: '', endDate: '', address: '' }); }} className="flex-1 bg-[#fb641b] text-white text-[9px] font-black py-2.5 rounded-xl active:scale-95 transition-all">Book</button>
+                           <button onClick={() => { setBookingTarget(s); setBookingForm(prev => ({ ...prev, startDate: '', endDate: '' })); }} className="flex-1 bg-[#fb641b] text-white text-[9px] font-black py-2.5 rounded-xl active:scale-95 transition-all">Book</button>
                         </div>
                     </div>
                   ))}
@@ -405,14 +449,24 @@ const App: React.FC = () => {
                   <input type="file" multiple accept="image/*" className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
                 </div>
                 <input placeholder="Service Title (e.g. Maharaja DJ)" className="w-full bg-gray-50 p-4 rounded-xl border-none outline-none font-bold text-sm shadow-inner" value={serviceForm.title} onChange={e => setServiceForm({...serviceForm, title: e.target.value})} required />
+                
+                {/* UPI FOR SERVICE */}
+                <input placeholder="UPI ID for this service (Biyana payment)" className="w-full bg-blue-50 p-4 rounded-xl border-none outline-none font-bold text-xs text-blue-600 shadow-inner" value={serviceForm.upiId} onChange={e => setServiceForm({...serviceForm, upiId: e.target.value})} />
+
                 <div className="grid grid-cols-2 gap-4">
                    <select className="bg-gray-50 p-4 rounded-xl font-black text-xs text-gray-500 shadow-inner" value={serviceForm.category} onChange={e => setServiceForm({...serviceForm, category: e.target.value})}>
-                     {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                     {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                     <option value="other">+ Create New Category</option>
                    </select>
                    <select className="bg-gray-50 p-4 rounded-xl font-black text-xs text-gray-500 shadow-inner" value={serviceForm.unitType} onChange={e => setServiceForm({...serviceForm, unitType: e.target.value})}>
                      <option>Per Day</option><option>Per Piece</option><option>Per Plate</option>
                    </select>
                 </div>
+
+                {serviceForm.category === 'other' && (
+                    <input placeholder="New Category Name..." className="w-full bg-green-50 p-4 rounded-xl border-none outline-none font-bold text-sm shadow-inner" value={serviceForm.customCategory} onChange={e => setServiceForm({...serviceForm, customCategory: e.target.value})} />
+                )}
+
                 <div className="grid grid-cols-2 gap-4">
                    <input placeholder="Price (₹)" type="number" className="bg-gray-50 p-4 rounded-xl font-bold text-sm shadow-inner" value={serviceForm.rate} onChange={e => setServiceForm({...serviceForm, rate: e.target.value})} required />
                    <input placeholder="Contact Phone" type="tel" className="bg-gray-50 p-4 rounded-xl font-bold text-sm shadow-inner" value={serviceForm.contactNumber} onChange={e => setServiceForm({...serviceForm, contactNumber: e.target.value})} required />
@@ -429,8 +483,8 @@ const App: React.FC = () => {
                   </div>
                   <div className="flex gap-2"><input placeholder="Manual item..." className="flex-1 bg-white p-4 rounded-xl text-xs font-bold shadow-inner" value={serviceForm.customItem || ''} onChange={e => setServiceForm({...serviceForm, customItem: e.target.value})} /><button type="button" onClick={() => { if(serviceForm.customItem) setServiceForm({...serviceForm, itemsIncluded: [...serviceForm.itemsIncluded, serviceForm.customItem], customItem: ''})} } className="bg-[#2874f0] text-white px-6 py-2 rounded-xl text-xs font-black shadow-lg">ADD</button></div>
                 </div>
-                <textarea placeholder="Tell customer about your service quality..." className="w-full bg-gray-50 p-4 rounded-xl font-medium text-sm h-40 outline-none shadow-inner" value={serviceForm.description} onChange={e => setServiceForm({...serviceForm, description: e.target.value})} />
-                <button type="submit" className="w-full bg-[#fb641b] text-white py-5 rounded-2xl font-black uppercase text-xs shadow-2xl tracking-widest active:scale-95 transition-all">Publish Service Live</button>
+                <textarea placeholder="Service Details..." className="w-full bg-gray-50 p-4 rounded-xl font-medium text-sm h-40 outline-none shadow-inner" value={serviceForm.description} onChange={e => setServiceForm({...serviceForm, description: e.target.value})} />
+                <button type="submit" className="w-full bg-[#fb641b] text-white py-5 rounded-2xl font-black uppercase text-xs shadow-2xl tracking-widest active:scale-95 transition-all">Publish Live</button>
               </form>
             </div>
           </div>
@@ -438,7 +492,7 @@ const App: React.FC = () => {
 
         {view === 'bookings' && (
           <div className="space-y-6">
-             <h2 className="text-xl font-black text-gray-800 border-l-8 border-[#fb641b] pl-4 mb-6 uppercase tracking-tighter">Current Orders</h2>
+             <h2 className="text-xl font-black text-gray-800 border-l-8 border-[#fb641b] pl-4 mb-6 uppercase tracking-tighter">Orders & Reviews</h2>
              {bookings.map(b => (
                <div key={b._id} className="bg-white p-6 rounded-[2.5rem] shadow-sm mb-6 border border-gray-50 animate-slideIn">
                  <div className="flex justify-between items-start mb-6">
@@ -451,22 +505,34 @@ const App: React.FC = () => {
                  <Stepper status={b.status} />
                  <div className="bg-gray-50 p-5 rounded-3xl text-[10px] font-black text-gray-600 space-y-3 shadow-inner">
                     <div className="flex justify-between uppercase tracking-widest"><span>Booking Dates:</span><span className="text-gray-900">{new Date(b.startDate).toLocaleDateString()} - {new Date(b.endDate).toLocaleDateString()}</span></div>
-                    <div className="flex justify-between border-t border-gray-200 pt-3"><span>Delivery Location:</span><span className="text-gray-900 line-clamp-1">{b.address}</span></div>
+                    <div className="flex justify-between border-t border-gray-200 pt-3"><span>Delivery Location:</span><span className="text-gray-900">{b.address} (PIN: {b.pincode})</span></div>
+                    {b.altMobile && <div className="flex justify-between border-t border-gray-200 pt-3"><span>Alt Mobile:</span><span className="text-gray-900">{b.altMobile}</span></div>}
                     <div className="flex justify-between border-t border-gray-200 pt-3"><span>Total Bill:</span><span className="text-gray-900 text-sm">₹{b.totalAmount}</span></div>
                  </div>
 
                  {user?.role === UserRole.USER && b.status === 'approved' && (
                     <div className="mt-6 p-5 bg-blue-50 rounded-[2rem] border-2 border-dashed border-blue-200 text-center animate-pulse">
-                        <p className="text-[10px] font-black text-blue-800 uppercase mb-4 tracking-widest">Pay Biyana (Advance) to UPI: {b.vendorId?.upiId}</p>
+                        <p className="text-[10px] font-black text-blue-800 uppercase mb-4 tracking-widest">Pay Biyana to UPI: {b.serviceId?.upiId || b.vendorId?.upiId}</p>
                         <input type="file" className="hidden" ref={proofInputRef} onChange={(e) => handleAdvanceUpload(e, b._id)} />
                         <button onClick={() => proofInputRef.current?.click()} className="w-full bg-[#2874f0] text-white py-4 rounded-xl text-[10px] font-black uppercase shadow-lg">Upload UPI Screenshot</button>
                     </div>
                  )}
 
-                 {user?.role === UserRole.USER && (b.status === 'advance_paid' || b.status === 'completed') && (
+                 {user?.role === UserRole.USER && b.status === 'advance_paid' && (
                     <div className="mt-6 p-5 bg-green-50 rounded-[2rem] text-center border border-green-100">
                         <p className="text-[10px] font-black text-green-800 uppercase mb-4">Your Completion OTP (Deliver to Vendor)</p>
                         <div className="text-3xl font-black text-green-600 tracking-[1rem] bg-white py-4 rounded-2xl shadow-inner">{b.otp}</div>
+                    </div>
+                 )}
+
+                 {user?.role === UserRole.USER && b.status === 'completed' && !b.review && (
+                    <button onClick={() => setReviewTarget(b)} className="w-full mt-6 bg-[#2874f0] text-white py-4 rounded-2xl text-[10px] font-black uppercase shadow-xl active:scale-95 transition-all">Rate & Comment Service</button>
+                 )}
+
+                 {b.review && (
+                    <div className="mt-6 p-4 bg-gray-50 rounded-2xl border border-gray-100 italic text-[11px] text-gray-600">
+                        <p className="font-black mb-1">Customer Review: {b.review.rating} ★</p>
+                        <p>"{b.review.comment}"</p>
                     </div>
                  )}
 
@@ -478,7 +544,7 @@ const App: React.FC = () => {
                  )}
 
                  {user?.role === UserRole.VENDOR && b.status === 'advance_paid' && (
-                    <button onClick={() => setOtpTarget({ id: b._id, code: '', correctCode: b.otp })} className="w-full mt-6 bg-[#2874f0] text-white py-4 rounded-2xl text-[10px] font-black uppercase shadow-xl tracking-widest active:scale-95 transition-all">Enter Service OTP (Deliver Now)</button>
+                    <button onClick={() => setOtpTarget({ id: b._id, code: '', correctCode: b.otp })} className="w-full mt-6 bg-[#2874f0] text-white py-4 rounded-2xl text-[10px] font-black uppercase shadow-xl tracking-widest active:scale-95 transition-all">Verify Completion OTP</button>
                  )}
                </div>
              ))}
@@ -494,10 +560,11 @@ const App: React.FC = () => {
                   <div className="flex-1">
                       <p className="font-black text-gray-800 text-[13px] uppercase truncate w-32 tracking-tighter">{s.title}</p>
                       <p className="text-[#2874f0] text-[11px] font-black mt-1">₹{s.rate} / {s.unitType}</p>
+                      <p className="text-[8px] font-bold text-gray-400 mt-1 uppercase tracking-widest">{s.category.replace('_', ' ')}</p>
                   </div>
                   <div className="flex flex-col gap-3">
                     <button onClick={() => deleteService(s._id)} className="w-10 h-10 rounded-2xl bg-red-50 text-red-500 flex items-center justify-center shadow-sm"><i className="fas fa-trash text-sm"></i></button>
-                    <button onClick={() => { setServiceForm({ ...s, customItem: '' }); setView('vendor-dashboard'); }} className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center shadow-sm"><i className="fas fa-edit text-sm"></i></button>
+                    <button onClick={() => { setServiceForm({ ...s, customItem: '', customCategory: '', upiId: s.upiId || '' }); setView('vendor-dashboard'); }} className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center shadow-sm"><i className="fas fa-edit text-sm"></i></button>
                   </div>
                </div>
              ))}
@@ -511,13 +578,13 @@ const App: React.FC = () => {
         {user?.role === UserRole.VENDOR && (
           <>
             <button onClick={() => setView('my-services')} className={`flex flex-col items-center gap-2 transition-all ${view === 'my-services' ? 'text-[#2874f0] scale-125' : 'text-gray-300'}`}><i className="fas fa-store text-xl"></i><span className="text-[8px] font-black uppercase tracking-widest">Shop</span></button>
-            <button onClick={() => { setServiceForm({title: '', category: 'tent', description: '', rate: '', unitType: 'Per Day', itemsIncluded: [], images: [], contactNumber: '', _id: '', customItem: ''}); setView('vendor-dashboard'); }} className={`flex flex-col items-center gap-2 transition-all ${view === 'vendor-dashboard' ? 'text-[#2874f0] scale-125' : 'text-gray-300'}`}><i className="fas fa-plus-circle text-xl"></i><span className="text-[8px] font-black uppercase tracking-widest">List</span></button>
+            <button onClick={() => { setServiceForm({title: '', category: 'tent', description: '', rate: '', unitType: 'Per Day', itemsIncluded: [], images: [], contactNumber: '', _id: '', customItem: '', customCategory: '', upiId: ''}); setView('vendor-dashboard'); }} className={`flex flex-col items-center gap-2 transition-all ${view === 'vendor-dashboard' ? 'text-[#2874f0] scale-125' : 'text-gray-300'}`}><i className="fas fa-plus-circle text-xl"></i><span className="text-[8px] font-black uppercase tracking-widest">List</span></button>
           </>
         )}
         <button onClick={() => { localStorage.clear(); setUser(null); }} className="text-red-200 transition-all hover:text-red-500"><i className="fas fa-power-off text-xl"></i></button>
       </nav>
 
-      {/* DETAIL MODAL - CUSTOMER VIEW */}
+      {/* DETAIL MODAL */}
       {detailTarget && (
         <div className="fixed inset-0 bg-black/70 z-[200] flex items-center justify-center p-5 backdrop-blur-md overflow-y-auto">
            <div className="bg-white w-full rounded-[3rem] p-8 animate-slideUp max-h-[90vh] overflow-y-auto shadow-2xl relative">
@@ -534,7 +601,7 @@ const App: React.FC = () => {
                     <p className="text-sm text-gray-700 font-bold leading-relaxed">{detailTarget.description}</p>
                  </div>
                  <div className="bg-gray-50/50 p-6 rounded-[2rem]">
-                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-5">Items & Inventory Included</p>
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-5">Inventory Included</p>
                     <div className="flex flex-wrap gap-3">
                        {(detailTarget.itemsIncluded || []).map((item: string, i: number) => (
                           <span key={i} className="bg-white border-2 border-gray-50 px-5 py-2.5 rounded-2xl text-[11px] font-black text-gray-600 shadow-sm flex items-center gap-2"><i className="fas fa-check-circle text-green-500"></i> {item}</span>
@@ -555,8 +622,8 @@ const App: React.FC = () => {
 
       {/* BOOKING MODAL */}
       {bookingTarget && (
-        <div className="fixed inset-0 bg-black/60 z-[300] flex items-center justify-center p-6 backdrop-blur-sm">
-           <div className="bg-white w-full rounded-[3rem] p-10 animate-slideUp shadow-2xl border-t-8 border-[#fb641b]">
+        <div className="fixed inset-0 bg-black/60 z-[300] flex items-center justify-center p-6 backdrop-blur-sm overflow-y-auto">
+           <div className="bg-white w-full rounded-[3rem] p-10 animate-slideUp shadow-2xl border-t-8 border-[#fb641b] max-h-[90vh] overflow-y-auto">
               <div className="flex justify-between items-center mb-8">
                 <h2 className="text-xl font-black text-gray-800 uppercase tracking-tighter">Booking Details</h2>
                 <button onClick={() => setBookingTarget(null)} className="text-gray-300 hover:text-red-500 transition-all"><i className="fas fa-times text-xl"></i></button>
@@ -571,8 +638,12 @@ const App: React.FC = () => {
                     <div className="space-y-2"><p className="text-[9px] font-black text-gray-400 uppercase ml-1">Event End</p><input type="date" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-black shadow-inner" required onChange={e => setBookingForm({...bookingForm, endDate: e.target.value})} /></div>
                  </div>
                  <div className="space-y-2">
-                    <p className="text-[9px] font-black text-gray-400 uppercase ml-1">Event Venue / Address</p>
-                    <textarea placeholder="Village Address" className="w-full bg-gray-50 p-5 rounded-xl text-xs font-black h-28 outline-none shadow-inner" required onChange={e => setBookingForm({...bookingForm, address: e.target.value})} />
+                    <p className="text-[9px] font-black text-gray-400 uppercase ml-1">Venue Address (Auto-saved)</p>
+                    <textarea placeholder="e.g. Rampur Village, Near School" className="w-full bg-gray-50 p-5 rounded-xl text-xs font-black h-24 outline-none shadow-inner" value={bookingForm.address} required onChange={e => setBookingForm({...bookingForm, address: e.target.value})} />
+                 </div>
+                 <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2"><p className="text-[9px] font-black text-gray-400 uppercase ml-1">Pincode</p><input type="text" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-black shadow-inner" value={bookingForm.pincode} required onChange={e => setBookingForm({...bookingForm, pincode: e.target.value})} /></div>
+                    <div className="space-y-2"><p className="text-[9px] font-black text-gray-400 uppercase ml-1">Alt Mobile</p><input type="tel" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-black shadow-inner" value={bookingForm.altMobile} onChange={e => setBookingForm({...bookingForm, altMobile: e.target.value})} /></div>
                  </div>
                  <button type="submit" className="w-full bg-[#fb641b] text-white py-6 rounded-2xl font-black uppercase text-xs shadow-2xl tracking-widest active:scale-95 transition-all">Submit Request</button>
               </form>
@@ -580,12 +651,33 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* OTP VERIFICATION MODAL - VENDOR VIEW */}
+      {/* REVIEW MODAL */}
+      {reviewTarget && (
+        <div className="fixed inset-0 bg-black/60 z-[300] flex items-center justify-center p-6 backdrop-blur-sm">
+           <div className="bg-white w-full rounded-[2rem] p-8 animate-slideUp shadow-2xl border-t-8 border-yellow-400">
+              <h2 className="text-xl font-black text-gray-800 mb-6 uppercase tracking-tighter">Share Experience</h2>
+              <form onSubmit={handleReview} className="space-y-6">
+                  <div className="flex justify-center gap-4">
+                      {[1,2,3,4,5].map(star => (
+                          <button key={star} type="button" onClick={() => setReviewForm({...reviewForm, rating: star})} className={`text-3xl ${reviewForm.rating >= star ? 'text-yellow-400' : 'text-gray-200'}`}><i className="fas fa-star"></i></button>
+                      ))}
+                  </div>
+                  <textarea placeholder="How was the service? (Any comments?)" className="w-full bg-gray-50 p-5 rounded-xl text-xs font-bold h-32 outline-none shadow-inner" required value={reviewForm.comment} onChange={e => setReviewForm({...reviewForm, comment: e.target.value})} />
+                  <div className="flex gap-4">
+                      <button type="button" onClick={() => setReviewTarget(null)} className="flex-1 bg-gray-100 text-gray-400 py-4 rounded-xl font-black uppercase text-[10px]">Cancel</button>
+                      <button type="submit" className="flex-2 bg-yellow-400 text-white py-4 rounded-xl font-black uppercase text-[10px] shadow-lg">Post Review</button>
+                  </div>
+              </form>
+           </div>
+        </div>
+      )}
+
+      {/* OTP VERIFICATION MODAL */}
       {otpTarget && (
         <div className="fixed inset-0 bg-black/60 z-[300] flex items-center justify-center p-6 backdrop-blur-sm">
            <div className="bg-white w-full rounded-[2rem] p-8 animate-slideUp text-center">
               <h2 className="text-lg font-black text-gray-800 mb-4 uppercase">Verify Delivery OTP</h2>
-              <p className="text-[10px] font-bold text-gray-400 mb-6">Ask customer for the security code shown on their app.</p>
+              <p className="text-[10px] font-bold text-gray-400 mb-6">Ask customer for the code shown on their app.</p>
               <input type="text" maxLength={4} className="w-full bg-gray-50 p-6 rounded-2xl text-3xl font-black text-center tracking-[1rem] outline-none shadow-inner mb-6" value={otpTarget.code} onChange={(e) => setOtpTarget({...otpTarget, code: e.target.value})} />
               <div className="flex gap-4">
                   <button onClick={() => setOtpTarget(null)} className="flex-1 bg-gray-100 text-gray-400 py-4 rounded-xl text-[10px] font-black uppercase">Back</button>
@@ -607,7 +699,6 @@ const App: React.FC = () => {
         @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
         .animate-slideIn { animation: slideIn 0.5s ease-out; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
-        @keyframes progress { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
       `}</style>
     </div>
   );
