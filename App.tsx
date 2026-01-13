@@ -126,7 +126,6 @@ const AdminDashboard = ({ adminSettings, setAdminSettings, updateBookingStatus }
 };
 
 const App: React.FC = () => {
-  // ADDED: Splash and Custom Category states
   const [showSplash, setShowSplash] = useState(true);
   const [isOtherCategory, setIsOtherCategory] = useState(false);
 
@@ -170,7 +169,6 @@ const App: React.FC = () => {
   const proofInputRef = useRef<HTMLInputElement>(null);
   const finalProofInputRef = useRef<HTMLInputElement>(null);
 
-  // ADDED: Splash timer
   useEffect(() => {
     const timer = setTimeout(() => setShowSplash(false), 3000);
     return () => clearTimeout(timer);
@@ -341,7 +339,6 @@ const App: React.FC = () => {
   const handleAddOrUpdateService = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // ADDED: Compulsory validation
     if (!serviceForm.contactNumber || serviceForm.contactNumber.length < 10) {
         alert("❌ COMPULSORY: Please add a valid 10-digit mobile number to list this service.");
         return;
@@ -360,21 +357,26 @@ const App: React.FC = () => {
       const v = allV.find((vend: any) => vend.userId === (user._id || user.id));
       if (!v) throw new Error("Profile missing");
 
-      // SURGICAL FIX: Body Mapping Check
-      const payload = {
+      // --- SURGICAL FIX: Clean Body Mapping ---
+      const payload: any = {
         ...serviceForm, 
         images: compressedImages, 
         vendorId: v._id,
-        rate: Number(serviceForm.rate) // Ensure rate is a number for the schema
+        rate: Number(serviceForm.rate)
       };
-
-      const isUpdating = !!serviceForm._id;
       
-      // SURGICAL FIX: Verify URL Path - removed redundant "/api" since API_BASE_URL has it
+      const isUpdating = !!serviceForm._id && serviceForm._id.trim() !== "";
+      
+      // Remove empty _id so MongoDB doesn't try to cast "" to ObjectId
+      if (!isUpdating) {
+        delete payload._id;
+      }
+
+      // --- SURGICAL FIX: Conditional URL Path ---
       const endpoint = isUpdating ? `${API_BASE_URL}/services/${serviceForm._id}` : `${API_BASE_URL}/services`;
 
       const res = await fetch(endpoint, {
-        method: isUpdating ? 'PUT' : 'POST', // Explicitly set method
+        method: isUpdating ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
@@ -528,8 +530,6 @@ const App: React.FC = () => {
 
   return (
     <div className="max-w-md mx-auto min-h-screen bg-[#f1f3f6] pb-24 relative overflow-x-hidden">
-      
-      {/* ADDED: Splash screen UI */}
       {showSplash && (
         <div className="fixed inset-0 bg-gradient-to-br from-[#2874f0] to-[#1e5bb8] z-[9999] flex flex-col items-center justify-center animate-pulse">
             <div className="text-center animate-bounce">
@@ -544,7 +544,6 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Header */}
       <header className="bg-[#2874f0] p-4 text-white sticky top-0 z-[100] shadow-md rounded-b-[1.5rem]">
         <div className="flex justify-between items-center mb-4">
           <div className="flex items-center gap-3"><i className="fas fa-bars text-xl"></i><h1 className="text-2xl font-black italic tracking-tighter">GramCart</h1></div>
@@ -567,7 +566,6 @@ const App: React.FC = () => {
         )}
       </header>
 
-      {/* Main Content */}
       <main className="p-4">
         {user.role === UserRole.ADMIN ? (
             <AdminDashboard adminSettings={adminSettings} setAdminSettings={setAdminSettings} updateBookingStatus={updateBookingStatus} />
@@ -708,7 +706,6 @@ const App: React.FC = () => {
                         required 
                      />
                      
-                     {/* ADDED: Dynamic category select with "Other" */}
                      <div className="grid grid-cols-2 gap-4">
                         <select 
                             className="w-full bg-gray-50 p-4 rounded-xl font-bold text-xs" 
@@ -741,7 +738,6 @@ const App: React.FC = () => {
                         />
                      )}
 
-                     {/* ADDED: Compulsory Mobile Field */}
                      <div className="space-y-1">
                         <p className="text-[9px] font-black text-red-500 uppercase ml-2">Contact Number (Compulsory)*</p>
                         <input 
