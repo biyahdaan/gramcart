@@ -40,21 +40,12 @@ const ServiceSchema = new mongoose.Schema({
   category: { type: String, required: true, index: true },
   title: { type: String, required: true },
   description: { type: String },
-  itemsIncluded: [String],
   unitType: { type: String, default: 'Per Day' },
   rate: { type: Number, required: true },
   images: [String],
   contactNumber: { type: String, required: true },
   upiId: { type: String },
-  createdAt: { type: Date, default: Date.now },
-  reviews: [
-    {
-      userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-      rating: { type: Number, required: true },
-      comment: { type: String },
-      createdAt: { type: Date, default: Date.now },
-    },
-  ],
+  createdAt: { type: Date, default: Date.now }
 });
 const Service = mongoose.models.Service || mongoose.model('Service', ServiceSchema);
 
@@ -73,9 +64,10 @@ const BookingSchema = new mongoose.Schema({
   otp: { type: String, required: true }, 
   status: { 
     type: String, 
-    enum: ['pending', 'approved', 'awaiting_advance_verification', 'advance_paid', 'awaiting_final_verification', 'completed', 'finished', 'rejected', 'reviewed'], 
+    enum: ['pending', 'approved', 'awaiting_advance_verification', 'advance_paid', 'awaiting_final_verification', 'completed', 'rejected'], 
     default: 'pending' 
   },
+  review: { rating: Number, comment: String },
   createdAt: { type: Date, default: Date.now }
 });
 const Booking = mongoose.models.Booking || mongoose.model('Booking', BookingSchema);
@@ -114,15 +106,6 @@ app.post('/api/services', async (req, res) => {
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
-app.put('/api/services/:id', async (req, res) => {
-    try {
-        const service = await Service.findByIdAndUpdate(req.params.id, req.body, { new: true });
-        res.json(service);
-    } catch (err) {
-        res.status(400).json({ error: err.message });
-    }
-});
-
 app.delete('/api/services/:id', async (req, res) => {
     try {
       await Service.findByIdAndDelete(req.params.id);
@@ -137,7 +120,7 @@ app.get('/api/search', async (req, res) => {
     const results = await Promise.all(vendors.map(async (v) => {
       let query = { vendorId: v._id };
       if (cat) query.category = cat;
-      const services = await Service.find(query).populate('reviews.userId', 'name');
+      const services = await Service.find(query);
       return { ...v, services };
     }));
     res.json(cat ? results.filter(v => v.services.length > 0) : results);
@@ -174,33 +157,9 @@ app.get('/api/my-bookings/:role/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.patch('/api/bookings/:id/finish', async (req, res) => {
-  try {
-    const { otp } = req.body;
-    const booking = await Booking.findById(req.params.id);
-    if (!booking) return res.status(404).json({ error: 'Booking not found' });
-    if (booking.otp !== otp) return res.status(400).json({ error: 'Invalid OTP' });
-
-    booking.status = 'finished';
-    await booking.save();
-    res.json(booking);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 app.patch('/api/bookings/:id/status', async (req, res) => {
   try {
-    const { review, ...statusUpdate } = req.body;
-    const booking = await Booking.findByIdAndUpdate(req.params.id, statusUpdate, { new: true });
-    if (review && booking) {
-        const service = await Service.findById(booking.serviceId);
-        if (service) {
-            service.reviews.push({ ...review, userId: booking.customerId });
-            await service.save();
-            await Booking.findByIdAndUpdate(req.params.id, { status: 'reviewed' });
-        }
-    }
+    const booking = await Booking.findByIdAndUpdate(req.params.id, req.body, { new: true });
     res.json(booking);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
