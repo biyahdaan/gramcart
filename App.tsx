@@ -6,23 +6,25 @@ import { LanguageSwitch } from './components/LanguageSwitch';
 
 const API_BASE_URL = "https://biyahdaan.onrender.com/api"; 
 
-const AdminDashboard = ({ adminSettings, setAdminSettings, updateBookingStatus }: { adminSettings: any, setAdminSettings: any, updateBookingStatus: any }) => {
+const AdminDashboard = ({ adminSettings, setAdminSettings, updateBookingStatus, token }: { adminSettings: any, setAdminSettings: any, updateBookingStatus: any, token: string }) => {
     const [adminData, setAdminData] = useState<any>(null);
     const [viewProof, setViewProof] = useState<string | null>(null);
 
     const fetchAdminData = async () => {
         try {
-            const res = await fetch(`${API_BASE_URL}/admin/all-data`);
+            const res = await fetch(`${API_BASE_URL}/admin/all-data`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
             if (res.ok) setAdminData(await res.json());
         } catch (e) { console.error(e); }
     };
 
-    useEffect(() => { fetchAdminData(); }, []);
+    useEffect(() => { if(token) fetchAdminData(); }, [token]);
 
     const saveSettings = async () => {
         await fetch(`${API_BASE_URL}/admin/settings`, {
             method: 'PATCH',
-            headers: {'Content-Type': 'application/json'},
+            headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`},
             body: JSON.stringify(adminSettings)
         });
         alert("System Settings Updated Successfully!");
@@ -113,7 +115,10 @@ const AdminDashboard = ({ adminSettings, setAdminSettings, updateBookingStatus }
                             </div>
                             <button onClick={async () => {
                                 if(window.confirm("Delete this service permanently?")) {
-                                    await fetch(`${API_BASE_URL}/services/${s._id}`, {method:'DELETE'});
+                                    await fetch(`${API_BASE_URL}/services/${s._id}`, {
+                                        method:'DELETE',
+                                        headers: { 'Authorization': `Bearer ${token}` }
+                                    });
                                     fetchAdminData();
                                 }
                             }} className="text-red-500 bg-white w-8 h-8 rounded-full shadow-sm flex items-center justify-center"><i className="fas fa-trash-alt text-[10px]"></i></button>
@@ -131,6 +136,7 @@ const App: React.FC = () => {
 
   const [lang, setLang] = useState<Language>(Language.EN);
   const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string>('');
   const [vendorProfile, setVendorProfile] = useState<any>(null);
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [view, setView] = useState<'home' | 'vendor-dashboard' | 'bookings' | 'my-services' | 'wishlist'>('home');
@@ -219,7 +225,9 @@ const App: React.FC = () => {
 
   const handleLogout = () => {
     localStorage.removeItem('gramcart_user');
+    localStorage.removeItem('gramcart_token');
     setUser(null);
+    setToken('');
     setVendorProfile(null);
     setView('home');
     setAuthMode('login');
@@ -239,14 +247,19 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const saved = localStorage.getItem('gramcart_user');
-    if (saved) {
+    const savedToken = localStorage.getItem('gramcart_token');
+    if (saved && savedToken) {
       try {
         const parsedUser = JSON.parse(saved);
         setUser(parsedUser);
+        setToken(savedToken);
         if (parsedUser.role === 'vendor') fetchVendorProfile(parsedUser._id || parsedUser.id);
         const savedWish = localStorage.getItem(`wish_${parsedUser._id || parsedUser.id}`);
         if (savedWish) setWishlist(JSON.parse(savedWish));
-      } catch (e) { localStorage.removeItem('gramcart_user'); }
+      } catch (e) { 
+        localStorage.removeItem('gramcart_user'); 
+        localStorage.removeItem('gramcart_token');
+      }
     }
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -276,28 +289,32 @@ const App: React.FC = () => {
   };
 
   const fetchBookings = async () => {
-    if (!user) return;
-    const res = await fetch(`${API_BASE_URL}/my-bookings/${user.role}/${user._id || user.id}`);
+    if (!user || !token) return;
+    const res = await fetch(`${API_BASE_URL}/my-bookings/${user.role}/${user._id || user.id}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+    });
     if (res.ok) setBookings(await res.json());
   };
 
   const fetchMyServices = async () => {
-    if (!user || user.role !== 'vendor') return;
+    if (!user || user.role !== 'vendor' || !token) return;
     const vRes = await fetch(`${API_BASE_URL}/search`);
     const allV = await vRes.json();
     const v = allV.find((vend: any) => vend.userId === (user._id || user.id));
     if (v) {
-        const res = await fetch(`${API_BASE_URL}/my-services/${v._id}`);
+        const res = await fetch(`${API_BASE_URL}/my-services/${v._id}`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+        });
         if (res.ok) setMyServices(await res.json());
     }
   };
 
   useEffect(() => {
-    if (user) {
+    if (user && token) {
       fetchBookings();
       if (user.role === UserRole.VENDOR) fetchMyServices();
     }
-  }, [user, view]);
+  }, [user, token, view]);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -312,13 +329,23 @@ const App: React.FC = () => {
             const res = await fetch(`${API_BASE_URL}/admin/settings`);
             const settings = await res.json();
             if (authForm.password === settings.password) {
-                const adminUser = { id: 'admin', name: 'Master Control', role: UserRole.ADMIN, email: 'admin@gramcart.com' };
-                localStorage.setItem('gramcart_user', JSON.stringify(adminUser));
-                setUser(adminUser);
-                setAdminSettings(settings);
-                setView('home'); 
-                setLoading(false);
-                return;
+                // For admin login, we still need a token. Using standard login route as admin.
+                const loginRes = await fetch(`${API_BASE_URL}/login`, { 
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' }, 
+                    body: JSON.stringify({ identifier: 'admin', password: settings.password }) 
+                });
+                const result = await loginRes.json();
+                if (loginRes.ok) {
+                    localStorage.setItem('gramcart_user', JSON.stringify(result.user));
+                    localStorage.setItem('gramcart_token', result.token);
+                    setUser(result.user);
+                    setToken(result.token);
+                    setAdminSettings(settings);
+                    setView('home'); 
+                    setLoading(false);
+                    return;
+                } else { alert("Admin Setup Required in Server"); setLoading(false); return; }
             } else { alert("Invalid Master Password"); setLoading(false); return; }
         } catch (err) { setLoading(false); return; }
     }
@@ -329,7 +356,9 @@ const App: React.FC = () => {
       const result = await res.json();
       if (res.ok) {
         localStorage.setItem('gramcart_user', JSON.stringify(result.user));
+        localStorage.setItem('gramcart_token', result.token);
         setUser(result.user);
+        setToken(result.token);
         if (result.user.role === 'vendor') fetchVendorProfile(result.user._id || result.user.id);
         setView(result.user.role === 'vendor' ? 'vendor-dashboard' : 'home');
       } else alert(result.error);
@@ -338,17 +367,11 @@ const App: React.FC = () => {
 
   const handleAddOrUpdateService = async (e: React.FormEvent) => {
     e.preventDefault();
-    
     if (!serviceForm.contactNumber || serviceForm.contactNumber.length < 10) {
         alert("❌ COMPULSORY: Please add a valid 10-digit mobile number to list this service.");
         return;
     }
-    if (!serviceForm.category) {
-        alert("❌ Please select or enter a category.");
-        return;
-    }
-
-    if (!user) return alert("Please login");
+    if (!user || !token) return alert("Please login");
     setLoading(true); setPublishStatus('Syncing Service...');
     try {
       const compressedImages = await Promise.all(serviceForm.images.map(img => img.startsWith('data:image') ? compressImage(img) : img));
@@ -357,7 +380,6 @@ const App: React.FC = () => {
       const v = allV.find((vend: any) => vend.userId === (user._id || user.id));
       if (!v) throw new Error("Profile missing");
 
-      // --- SURGICAL FIX: Clean Body Mapping ---
       const payload: any = {
         ...serviceForm, 
         images: compressedImages, 
@@ -366,18 +388,12 @@ const App: React.FC = () => {
       };
       
       const isUpdating = !!serviceForm._id && serviceForm._id.trim() !== "";
-      
-      // Remove empty _id so MongoDB doesn't try to cast "" to ObjectId
-      if (!isUpdating) {
-        delete payload._id;
-      }
+      if (!isUpdating) delete payload._id;
 
-      // --- SURGICAL FIX: Conditional URL Path ---
       const endpoint = isUpdating ? `${API_BASE_URL}/services/${serviceForm._id}` : `${API_BASE_URL}/services`;
-
       const res = await fetch(endpoint, {
         method: isUpdating ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify(payload)
       });
 
@@ -391,27 +407,14 @@ const App: React.FC = () => {
       } else {
           const errData = await res.json();
           alert(`Error: ${errData.error || 'Server error'}`);
-          setLoading(false);
-          setPublishStatus('');
+          setLoading(false); setPublishStatus('');
       }
-    } catch (e) { 
-        alert("Save failed"); 
-        setLoading(false); 
-        setPublishStatus('');
-    }
+    } catch (e) { alert("Save failed"); setLoading(false); setPublishStatus(''); }
   };
 
   const handleBooking = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user || !bookingTarget) return;
-    const start = new Date(bookingForm.startDate);
-    const end = new Date(bookingForm.endDate);
-    const isBlocked = bookingTarget.blockedDates?.some((d: string) => {
-        const blocked = new Date(d);
-        return blocked >= start && blocked <= end;
-    });
-    if (isBlocked) return alert("Error: These dates were just booked by someone else!");
-
+    if (!user || !token || !bookingTarget) return;
     setLoading(true);
     try {
       const vRes = await fetch(`${API_BASE_URL}/search`);
@@ -419,7 +422,7 @@ const App: React.FC = () => {
       const v = allV.find((vend: any) => vend.services.some((s: any) => s._id === bookingTarget._id));
       const res = await fetch(`${API_BASE_URL}/bookings`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ 
           ...bookingForm, 
           customerId: user._id || user.id, 
@@ -430,12 +433,13 @@ const App: React.FC = () => {
         })
       });
       if (res.ok) { setBookingTarget(null); setView('bookings'); fetchBookings(); }
+      else { const errData = await res.json(); alert(errData.error); }
     } catch (e) {} finally { setLoading(false); }
   };
 
   const handleProofUpload = (e: React.ChangeEvent<HTMLInputElement>, bookingId: string, field: 'advanceProof' | 'finalProof') => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || !token) return;
     const reader = new FileReader();
     reader.onloadend = async () => {
       setLoading(true);
@@ -443,7 +447,7 @@ const App: React.FC = () => {
       const status = field === 'advanceProof' ? 'awaiting_advance_verification' : 'awaiting_final_verification';
       await fetch(`${API_BASE_URL}/bookings/${bookingId}/status`, { 
         method: 'PATCH', 
-        headers: { 'Content-Type': 'application/json' }, 
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, 
         body: JSON.stringify({ [field]: compressed, status }) 
       });
       fetchBookings(); setLoading(false);
@@ -452,11 +456,12 @@ const App: React.FC = () => {
   };
 
   const updateBookingStatus = async (id: string, payload: any) => {
+    if(!token) return;
     setLoading(true);
     try {
       const res = await fetch(`${API_BASE_URL}/bookings/${id}/status`, { 
         method: 'PATCH', 
-        headers: { 'Content-Type': 'application/json' }, 
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, 
         body: JSON.stringify(payload) 
       });
       if (res.ok) fetchBookings();
@@ -568,7 +573,7 @@ const App: React.FC = () => {
 
       <main className="p-4">
         {user.role === UserRole.ADMIN ? (
-            <AdminDashboard adminSettings={adminSettings} setAdminSettings={setAdminSettings} updateBookingStatus={updateBookingStatus} />
+            <AdminDashboard adminSettings={adminSettings} setAdminSettings={setAdminSettings} updateBookingStatus={updateBookingStatus} token={token} />
         ) : (
           <>
             {view === 'home' && (
@@ -629,12 +634,12 @@ const App: React.FC = () => {
                           </div>
                           <button 
                               onClick={async () => {
-                                  if(!vendorProfile?.upiId) return alert("Please enter UPI ID first");
+                                  if(!vendorProfile?.upiId || !token) return alert("Please enter UPI ID first");
                                   setLoading(true);
                                   try {
                                     const res = await fetch(`${API_BASE_URL}/vendors/${vendorProfile._id}`, {
                                         method: 'PATCH',
-                                        headers: {'Content-Type': 'application/json'},
+                                        headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`},
                                         body: JSON.stringify({ upiId: vendorProfile.upiId })
                                     });
                                     if(res.ok) alert("Withdrawal Request Initiated & Payout UPI Saved!");
@@ -666,7 +671,7 @@ const App: React.FC = () => {
                                   </div>
                                   <div className="flex gap-2">
                                       <button onClick={() => { setServiceForm(s); setView('my-services'); }} className="text-blue-500 p-2"><i className="fas fa-edit"></i></button>
-                                      <button onClick={async () => { if(window.confirm("Remove?")) await fetch(`${API_BASE_URL}/services/${s._id}`, {method: 'DELETE'}); fetchMyServices(); }} className="text-red-400 p-2"><i className="fas fa-trash-alt"></i></button>
+                                      <button onClick={async () => { if(window.confirm("Remove?") && token) await fetch(`${API_BASE_URL}/services/${s._id}`, {method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` }}); fetchMyServices(); }} className="text-red-400 p-2"><i className="fas fa-trash-alt"></i></button>
                                   </div>
                               </div>
                           ))}
@@ -850,7 +855,7 @@ const App: React.FC = () => {
                                             <button onClick={() => finalProofInputRef.current?.click()} className="w-full bg-orange-500 text-white py-3 rounded-xl text-[10px] font-black uppercase shadow-sm">Upload Final Bill Proof</button>
                                         </>
                                       )}
-                                      {b.status === 'final_paid' && (
+                                      {b.status === 'final_paid' && b.otp && (
                                           <div className="bg-green-50 p-6 rounded-3xl text-center border-2 border-dashed border-green-200 animate-bounce">
                                               <p className="text-[10px] font-black text-green-700 uppercase mb-2">Payment Approved! Share OTP with Vendor</p>
                                               <h3 className="text-4xl font-black text-green-600 tracking-[0.8rem] ml-3">{b.otp}</h3>

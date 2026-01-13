@@ -173,7 +173,6 @@ app.post('/api/bookings', authenticate(['user', 'vendor']), async (req, res) => 
   try {
     const { serviceId, startDate, endDate } = req.body;
     
-    // ATOMIC LOCK: Check for date conflicts before creating
     const startStr = new Date(startDate).toISOString().split('T')[0];
     const endStr = new Date(endDate).toISOString().split('T')[0];
     
@@ -210,8 +209,18 @@ app.get('/api/my-bookings/:role/:id', authenticate(), async (req, res) => {
     } else {
         query = { customerId: id };
     }
-    const bookings = await Booking.find(query).populate('serviceId').populate('vendorId').populate('customerId').sort({ createdAt: -1 });
-    res.json(bookings);
+    
+    // Privacy Logic: Only send OTP to the Customer who owns the booking
+    const bookings = await Booking.find(query).populate('serviceId').populate('vendorId').populate('customerId').sort({ createdAt: -1 }).lean();
+    const safeBookings = bookings.map(b => {
+      if (role !== 'user' || String(b.customerId?._id) !== String(req.user.id)) {
+        const { otp, ...rest } = b;
+        return rest;
+      }
+      return b;
+    });
+
+    res.json(safeBookings);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
