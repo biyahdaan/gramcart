@@ -45,7 +45,14 @@ const ServiceSchema = new mongoose.Schema({
   images: [String],
   contactNumber: { type: String, required: true },
   upiId: { type: String },
-  createdAt: { type: Date, default: Date.now }
+  createdAt: { type: Date, default: Date.now },
+  reviews: [
+    {
+      rating: { type: Number, required: true },
+      comment: { type: String },
+      createdAt: { type: Date, default: Date.now },
+    },
+  ],
 });
 const Service = mongoose.models.Service || mongoose.model('Service', ServiceSchema);
 
@@ -162,6 +169,30 @@ app.patch('/api/bookings/:id/status', async (req, res) => {
     const booking = await Booking.findByIdAndUpdate(req.params.id, req.body, { new: true });
     res.json(booking);
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch('/api/bookings/:id/review', async (req, res) => {
+    try {
+        const { rating, comment } = req.body;
+        const booking = await Booking.findByIdAndUpdate(
+            req.params.id,
+            { review: { rating, comment } },
+            { new: true }
+        );
+        if (!booking) {
+            return res.status(404).json({ error: 'Booking not found' });
+        }
+
+        const service = await Service.findById(booking.serviceId);
+        if (service) {
+            service.reviews.push({ rating, comment });
+            await service.save();
+        }
+
+        res.json(booking);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 app.listen(5000, () => console.log('Server running on 5000'));
