@@ -64,7 +64,7 @@ const BookingSchema = new mongoose.Schema({
   otp: { type: String, required: true }, 
   status: { 
     type: String, 
-    enum: ['pending', 'approved', 'awaiting_advance_verification', 'advance_paid', 'awaiting_final_verification', 'completed', 'rejected'], 
+    enum: ['pending', 'approved', 'awaiting_advance_verification', 'advance_paid', 'awaiting_final_verification', 'finished', 'reviewed', 'completed', 'rejected'], 
     default: 'pending' 
   },
   review: { rating: Number, comment: String },
@@ -162,6 +162,28 @@ app.patch('/api/bookings/:id/status', async (req, res) => {
     const booking = await Booking.findByIdAndUpdate(req.params.id, req.body, { new: true });
     res.json(booking);
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch('/api/bookings/:id/finish', async (req, res) => {
+  try {
+    const { otp } = req.body;
+    const booking = await Booking.findById(req.params.id);
+
+    if (!booking) {
+      return res.status(404).json({ error: 'Booking not found' });
+    }
+
+    if (booking.otp !== otp) {
+      return res.status(400).json({ error: 'Invalid OTP' });
+    }
+
+    booking.status = 'finished';
+    await booking.save();
+
+    res.json(booking);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.listen(5000, () => console.log('Server running on 5000'));
