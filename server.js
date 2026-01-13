@@ -36,19 +36,19 @@ const Vendor = mongoose.models.Vendor || mongoose.model('Vendor', new mongoose.S
   businessName: { type: String, required: true, index: true },
   rating: { type: Number, default: 5 },
   isVerified: { type: Boolean, default: false },
-  upiId: { type: String }, // Vendor UPI ID
-  advancePercent: { type: Number, default: 10 } // Biyana percentage
+  upiId: { type: String },
+  advancePercent: { type: Number, default: 10 }
 }));
 
 const Service = mongoose.models.Service || mongoose.model('Service', new mongoose.Schema({
   vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor', index: true, required: true },
   category: { type: String, required: true, index: true },
   title: { type: String, required: true },
+  description: { type: String },
   unitType: { type: String, default: 'Per Day' },
   rate: { type: Number, required: true },
   itemsIncluded: [String],
   images: [String],
-  description: String,
   contactNumber: { type: String, required: true },
   createdAt: { type: Date, default: Date.now }
 }));
@@ -61,7 +61,7 @@ const Booking = mongoose.models.Booking || mongoose.model('Booking', new mongoos
   endDate: Date,
   address: String,
   totalAmount: Number,
-  advanceProof: String, // Screenshot URL/Base64
+  advanceProof: String,
   advanceVerified: { type: Boolean, default: false },
   status: { 
     type: String, 
@@ -104,12 +104,23 @@ app.post('/api/login', async (req, res) => {
   } catch (err) { res.status(500).json({ error: "Login error" }); }
 });
 
+// FIXED SERVICE POSTING ROUTE
 app.post('/api/services', async (req, res) => {
   try {
+    console.log("Receiving Service Data:", req.body);
+    const { vendorId, category, title, rate, contactNumber } = req.body;
+    
+    if (!vendorId || !category || !title || !rate || !contactNumber) {
+      return res.status(400).json({ error: "Missing required fields: Title, Category, Rate, or Contact" });
+    }
+
     const newService = new Service(req.body);
     const saved = await newService.save();
     res.status(201).json(saved);
-  } catch (err) { res.status(400).json({ error: err.message }); }
+  } catch (err) { 
+    console.error("Service Save Error:", err);
+    res.status(400).json({ error: err.message }); 
+  }
 });
 
 app.put('/api/services/:id', async (req, res) => {
