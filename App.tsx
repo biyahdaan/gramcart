@@ -33,9 +33,13 @@ const App: React.FC = () => {
   useEffect(() => {
     const saved = localStorage.getItem('gramcart_user');
     if (saved) {
-      const parsedUser = JSON.parse(saved);
-      setUser(parsedUser);
-      if (parsedUser.role === 'vendor') setView('vendor-dashboard');
+      try {
+        const parsedUser = JSON.parse(saved);
+        setUser(parsedUser);
+        if (parsedUser?.role === 'vendor') setView('vendor-dashboard');
+      } catch (e) {
+        localStorage.removeItem('gramcart_user');
+      }
     }
     fetchData();
   }, []);
@@ -43,7 +47,7 @@ const App: React.FC = () => {
   useEffect(() => {
     if (user) {
       fetchBookings();
-      if (user.role === 'vendor') fetchMyServices();
+      if (user.role === UserRole.VENDOR) fetchMyServices();
     }
   }, [user, view]);
 
@@ -65,7 +69,7 @@ const App: React.FC = () => {
   };
 
   const fetchMyServices = async () => {
-    if (!user || user.role !== 'vendor') return;
+    if (!user || user.role !== UserRole.VENDOR) return;
     try {
       const vendorsRes = await fetch(`${API_BASE_URL}/search`);
       const allVendors = await vendorsRes.json();
@@ -111,8 +115,8 @@ const App: React.FC = () => {
         localStorage.setItem('gramcart_user', JSON.stringify(result.user));
         setUser(result.user);
         setView(result.user.role === 'vendor' ? 'vendor-dashboard' : 'home');
-      } else { alert(result.error); }
-    } catch (err) { alert("Server Error"); } finally { setLoading(false); }
+      } else { alert(result.error || "Authentication failed"); }
+    } catch (err) { alert("Server Connection Error"); } finally { setLoading(false); }
   };
 
   const togglePresetItem = (item: string) => {
@@ -125,7 +129,7 @@ const App: React.FC = () => {
   };
 
   const addCustomItem = () => {
-    if (serviceForm.customItem.trim()) {
+    if (serviceForm.customItem?.trim()) {
       setServiceForm({
         ...serviceForm,
         itemsIncluded: [...serviceForm.itemsIncluded, serviceForm.customItem.trim()],
@@ -136,11 +140,12 @@ const App: React.FC = () => {
 
   const handleAddOrUpdateService = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!user) return;
     setLoading(true);
     try {
       const vendorsRes = await fetch(`${API_BASE_URL}/search`);
       const allVendors = await vendorsRes.json();
-      const currentVendor = allVendors.find((v: any) => v.userId === (user?._id || user?.id));
+      const currentVendor = allVendors.find((v: any) => v.userId === (user._id || user.id));
       const method = serviceForm._id ? 'PUT' : 'POST';
       const endpoint = serviceForm._id ? `/services/${serviceForm._id}` : '/services';
       const payload = {
@@ -174,7 +179,6 @@ const App: React.FC = () => {
     try {
       const vendorsRes = await fetch(`${API_BASE_URL}/search`);
       const allVendors = await vendorsRes.json();
-      // Find the specific vendor object for the target service
       const targetVendor = allVendors.find((v: any) => v.services.some((s: any) => s._id === bookingTarget._id));
 
       const diff = new Date(bookingForm.endDate).getTime() - new Date(bookingForm.startDate).getTime();
@@ -201,17 +205,49 @@ const App: React.FC = () => {
     } catch (e) { alert("Booking failed"); } finally { setLoading(false); }
   };
 
+  if (!user) {
+    return (
+      <div className="max-w-md mx-auto min-h-screen bg-blue-600 flex items-center justify-center p-6">
+        <div className="bg-white w-full p-8 rounded-[2.5rem] shadow-2xl">
+          <h1 className="text-4xl font-black text-blue-600 italic text-center mb-6 tracking-tight">GramCart</h1>
+          <form onSubmit={handleAuth} className="space-y-3">
+            {authMode === 'register' ? (
+              <>
+                <input placeholder="Name" className="w-full bg-gray-50 p-4 rounded-2xl border border-gray-100 outline-none focus:border-blue-300" onChange={e => setAuthForm({...authForm, name: e.target.value})} required />
+                <input placeholder="Mobile" className="w-full bg-gray-50 p-4 rounded-2xl border border-gray-100 outline-none focus:border-blue-300" onChange={e => setAuthForm({...authForm, mobile: e.target.value})} required />
+              </>
+            ) : (
+              <input placeholder="Email or Mobile" className="w-full bg-gray-50 p-4 rounded-2xl border border-gray-100 outline-none focus:border-blue-300" onChange={e => setAuthForm({...authForm, identifier: e.target.value})} required />
+            )}
+            <input placeholder="Password" type="password" className="w-full bg-gray-50 p-4 rounded-2xl border border-gray-100 outline-none focus:border-blue-300" onChange={e => setAuthForm({...authForm, password: e.target.value})} required />
+            {authMode === 'register' && (
+              <div className="flex gap-2 p-1 bg-gray-50 rounded-2xl border border-gray-100">
+                {['user', 'vendor'].map(r => (
+                  <button key={r} type="button" onClick={() => setAuthForm({...authForm, role: r})} className={`flex-1 py-2 rounded-xl text-[10px] font-bold transition-all ${authForm.role === r ? 'bg-blue-600 text-white shadow-md' : 'text-gray-400'}`}>{r.toUpperCase()}</button>
+                ))}
+              </div>
+            )}
+            <button className="w-full py-4 rounded-2xl font-black text-white bg-blue-600 shadow-xl active:scale-[0.98] transition-all" disabled={loading}>{loading ? '...' : (authMode === 'login' ? 'LOGIN' : 'SIGN UP')}</button>
+          </form>
+          <p className="text-center mt-5 text-[10px] font-black text-gray-400 cursor-pointer uppercase tracking-widest hover:text-blue-600 transition-colors" onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}>
+            {authMode === 'login' ? "Create New Account" : "Back to Login"}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-md mx-auto min-h-screen bg-gray-50 pb-24 font-sans relative">
-      <header className={`p-6 rounded-b-[2.5rem] shadow-xl text-white ${view === 'home' || view === 'bookings' ? 'bg-blue-600' : 'bg-purple-600'}`}>
+      <header className={`p-6 rounded-b-[2.5rem] shadow-xl text-white transition-colors duration-500 ${view === 'home' || view === 'bookings' ? 'bg-blue-600' : 'bg-purple-600'}`}>
         <div className="flex justify-between items-center mb-4">
           <h1 className="text-2xl font-black italic tracking-tight">GramCart</h1>
           <LanguageSwitch current={lang} onChange={setLang} />
         </div>
         {view === 'home' && (
           <div className="flex gap-2 overflow-x-auto no-scrollbar py-2">
-            <button onClick={() => fetchData('')} className="bg-white/20 px-4 py-2 rounded-full whitespace-nowrap text-[10px] font-bold">ALL</button>
-            {CATEGORIES.map(c => <button key={c.id} onClick={() => fetchData(c.id)} className="bg-white/20 px-4 py-2 rounded-full whitespace-nowrap text-[10px] font-bold uppercase">{c.name}</button>)}
+            <button onClick={() => fetchData('')} className="bg-white/20 px-4 py-2 rounded-full whitespace-nowrap text-[10px] font-bold backdrop-blur-md">ALL</button>
+            {CATEGORIES.map(c => <button key={c.id} onClick={() => fetchData(c.id)} className="bg-white/20 px-4 py-2 rounded-full whitespace-nowrap text-[10px] font-bold uppercase backdrop-blur-md">{c.name}</button>)}
           </div>
         )}
       </header>
@@ -220,16 +256,16 @@ const App: React.FC = () => {
         {view === 'home' && (
           <div className="space-y-4">
             {data.map(vendor => (
-              <div key={vendor._id} className="bg-white rounded-3xl p-5 shadow-sm border animate-fade">
+              <div key={vendor._id} className="bg-white rounded-3xl p-5 shadow-sm border border-gray-100 animate-fade">
                 <h3 className="font-black text-gray-800 text-lg mb-4">{vendor.businessName}</h3>
                 <div className="space-y-3">
                   {vendor.services?.map((s: any) => (
-                    <div key={s._id} className="bg-gray-50 p-4 rounded-2xl border border-gray-100 hover:border-blue-200 transition-all">
+                    <div key={s._id} className="bg-gray-50 p-4 rounded-2xl border border-gray-100 hover:border-blue-200 transition-all group">
                       <div className="flex justify-between items-start mb-2">
                         <p className="text-xs font-black text-gray-700">{s.title}</p>
                         <p className="text-sm font-black text-blue-600">₹{s.rate}/<span className="text-[10px] font-normal">{s.unitType}</span></p>
                       </div>
-                      <button onClick={() => setBookingTarget(s)} className="w-full bg-blue-600 text-white py-2.5 rounded-xl text-[10px] font-black uppercase shadow-md active:scale-95 transition-all">Book Now</button>
+                      <button onClick={() => setBookingTarget(s)} className="w-full bg-blue-600 text-white py-2.5 rounded-xl text-[10px] font-black uppercase shadow-md active:scale-95 transition-all group-hover:bg-blue-700">Book Now</button>
                     </div>
                   ))}
                 </div>
@@ -238,14 +274,14 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {view === 'vendor-dashboard' && (
+        {view === 'vendor-dashboard' && user?.role === UserRole.VENDOR && (
           <div className="space-y-6">
             <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-purple-100">
               <h3 className="text-xs font-black text-purple-600 uppercase mb-5 tracking-widest flex items-center gap-2">
                  <i className="fas fa-plus-circle"></i> Create New Listing
               </h3>
               <form onSubmit={handleAddOrUpdateService} className="space-y-4">
-                <input placeholder="Listing Title (e.g. Deluxe Wedding Tent)" className="w-full bg-gray-50 p-4 rounded-2xl border border-gray-100 outline-none" value={serviceForm.title} onChange={e => setServiceForm({...serviceForm, title: e.target.value})} required />
+                <input placeholder="Listing Title" className="w-full bg-gray-50 p-4 rounded-2xl border border-gray-100 outline-none focus:border-purple-300" value={serviceForm.title} onChange={e => setServiceForm({...serviceForm, title: e.target.value})} required />
                 <div className="grid grid-cols-2 gap-3">
                   <select className="bg-gray-50 p-4 rounded-2xl border border-gray-100 outline-none text-[10px] font-bold" value={serviceForm.category} onChange={e => setServiceForm({...serviceForm, category: e.target.value})}>
                     {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -255,8 +291,8 @@ const App: React.FC = () => {
                   </select>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <input placeholder="Price (₹)" type="number" className="bg-gray-50 p-4 rounded-2xl border border-gray-100 outline-none" value={serviceForm.rate} onChange={e => setServiceForm({...serviceForm, rate: e.target.value})} required />
-                  <input placeholder="Business Contact" type="tel" className="bg-gray-50 p-4 rounded-2xl border border-gray-100 outline-none" value={serviceForm.contactNumber} onChange={e => setServiceForm({...serviceForm, contactNumber: e.target.value})} required />
+                  <input placeholder="Price (₹)" type="number" className="bg-gray-50 p-4 rounded-2xl border border-gray-100 outline-none focus:border-purple-300" value={serviceForm.rate} onChange={e => setServiceForm({...serviceForm, rate: e.target.value})} required />
+                  <input placeholder="Business Contact" type="tel" className="bg-gray-50 p-4 rounded-2xl border border-gray-100 outline-none focus:border-purple-300" value={serviceForm.contactNumber} onChange={e => setServiceForm({...serviceForm, contactNumber: e.target.value})} required />
                 </div>
                 <div className="bg-purple-50 p-5 rounded-2xl border border-purple-100">
                   <p className="text-[10px] font-black text-purple-400 uppercase mb-3">Itemized Inventory</p>
@@ -266,11 +302,11 @@ const App: React.FC = () => {
                     ))}
                   </div>
                   <div className="flex gap-2">
-                    <input placeholder="Manual Entry..." className="flex-1 bg-white p-3 rounded-xl text-[10px] border border-gray-100 outline-none" value={serviceForm.customItem} onChange={e => setServiceForm({...serviceForm, customItem: e.target.value})} />
-                    <button type="button" onClick={addCustomItem} className="bg-purple-600 text-white px-5 py-2 rounded-xl text-[10px] font-black">ADD</button>
+                    <input placeholder="Manual Entry..." className="flex-1 bg-white p-3 rounded-xl text-[10px] border border-gray-100 outline-none" value={serviceForm.customItem || ''} onChange={e => setServiceForm({...serviceForm, customItem: e.target.value})} />
+                    <button type="button" onClick={addCustomItem} className="bg-purple-600 text-white px-5 py-2 rounded-xl text-[10px] font-black active:scale-95 transition-all">ADD</button>
                   </div>
                 </div>
-                <button className="w-full bg-purple-600 text-white py-4.5 rounded-2xl font-black text-[11px] shadow-lg shadow-purple-200">PUBLISH SERVICE</button>
+                <button className="w-full bg-purple-600 text-white py-4.5 rounded-2xl font-black text-[11px] shadow-lg shadow-purple-200 active:scale-[0.98] transition-all">PUBLISH SERVICE</button>
               </form>
             </div>
           </div>
@@ -279,7 +315,7 @@ const App: React.FC = () => {
         {view === 'bookings' && (
           <div className="space-y-4">
             <h2 className="font-black text-gray-800 text-lg mb-4 flex items-center justify-between">
-              {user.role === 'vendor' ? 'Orders Received' : 'My Bookings'}
+              {user?.role === UserRole.VENDOR ? 'Orders Received' : 'My Bookings'}
               <span className="text-[10px] bg-blue-100 text-blue-600 px-3 py-1 rounded-full">{bookings.length} Total</span>
             </h2>
             
@@ -296,7 +332,7 @@ const App: React.FC = () => {
                   <div>
                     <p className="text-[10px] font-black text-blue-600 uppercase tracking-wide">{b.serviceId?.title || 'Service Request'}</p>
                     <p className="text-sm font-black text-gray-800 mt-1">
-                      {user.role === 'vendor' ? `Client: ${b.customerId?.name}` : `Vendor: ${b.vendorId?.businessName}`}
+                      {user?.role === UserRole.VENDOR ? `Client: ${b.customerId?.name}` : `Vendor: ${b.vendorId?.businessName}`}
                     </p>
                   </div>
                   <div className="text-right">
@@ -312,7 +348,7 @@ const App: React.FC = () => {
                     <i className="fas fa-calendar-alt text-blue-400 mt-1 text-xs"></i>
                     <div>
                         <p className="text-[9px] font-black text-gray-400 uppercase">Event Schedule</p>
-                        <p className="text-[10px] font-bold text-gray-600">{new Date(b.startDate).toLocaleDateString('hi-IN')} — {new Date(b.endDate).toLocaleDateString('hi-IN')}</p>
+                        <p className="text-[10px] font-bold text-gray-600">{new Date(b.startDate).toLocaleDateString()} — {new Date(b.endDate).toLocaleDateString()}</p>
                     </div>
                   </div>
                   <div className="flex items-start gap-3">
@@ -323,29 +359,27 @@ const App: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Selective Contact Visibility */}
-                  {(user.role === 'vendor' || (user.role === 'user' && b.status === 'approved')) && (
+                  {(user?.role === UserRole.VENDOR || (user?.role === UserRole.USER && b.status === 'approved')) && (
                     <div className="bg-white p-3 rounded-xl border border-dashed border-blue-200 flex items-center justify-between">
                       <div className="flex items-center gap-3">
                         <i className="fas fa-phone-alt text-green-500 text-xs"></i>
                         <span className="text-xs font-black text-gray-700">
-                          {user.role === 'vendor' ? b.customerId?.mobile : b.serviceId?.contactNumber}
+                          {user?.role === UserRole.VENDOR ? b.customerId?.mobile : b.serviceId?.contactNumber}
                         </span>
                       </div>
-                      <a href={`tel:${user.role === 'vendor' ? b.customerId?.mobile : b.serviceId?.contactNumber}`} className="bg-green-500 text-white p-2 rounded-lg text-[10px]">
+                      <a href={`tel:${user?.role === UserRole.VENDOR ? b.customerId?.mobile : b.serviceId?.contactNumber}`} className="bg-green-500 text-white p-2 rounded-lg text-[10px]">
                         <i className="fas fa-phone"></i>
                       </a>
                     </div>
                   )}
-                  {user.role === 'user' && b.status === 'pending' && (
+                  {user?.role === UserRole.USER && b.status === 'pending' && (
                     <div className="bg-white/50 p-3 rounded-xl text-center border border-gray-200">
                         <p className="text-[8px] text-gray-400 font-bold italic">Vendor contact will be visible once they accept your order.</p>
                     </div>
                   )}
                 </div>
 
-                {/* Vendor Approval Controls */}
-                {user.role === 'vendor' && b.status === 'pending' && (
+                {user?.role === UserRole.VENDOR && b.status === 'pending' && (
                   <div className="flex gap-3 mt-5">
                     <button onClick={() => updateBookingStatus(b._id, 'approved')} className="flex-1 bg-green-500 text-white py-3 rounded-2xl text-[10px] font-black uppercase shadow-lg shadow-green-100 active:scale-95 transition-all">Accept Order</button>
                     <button onClick={() => updateBookingStatus(b._id, 'rejected')} className="flex-1 bg-white text-red-500 border-2 border-red-50 py-3 rounded-2xl text-[10px] font-black uppercase active:scale-95 transition-all">Decline</button>
@@ -356,7 +390,7 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {view === 'my-services' && (
+        {view === 'my-services' && user?.role === UserRole.VENDOR && (
           <div className="space-y-4">
             <h2 className="font-black text-gray-800 text-lg mb-4 flex items-center gap-3">
                 <i className="fas fa-store text-purple-600"></i> My Active Store
@@ -378,10 +412,9 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {/* Booking Checkout Modal */}
       {bookingTarget && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-md z-[100] flex items-end justify-center p-4">
-          <div className="bg-white w-full max-w-md rounded-[3rem] p-8 pb-10 animate-slideUp">
+          <div className="bg-white w-full max-w-md rounded-[3rem] p-8 pb-10 animate-slideUp shadow-2xl">
             <div className="flex justify-between items-center mb-6">
               <h3 className="font-black text-xl text-gray-800">Complete Booking</h3>
               <button onClick={() => setBookingTarget(null)} className="w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center text-gray-400"><i className="fas fa-times"></i></button>
@@ -401,27 +434,26 @@ const App: React.FC = () => {
                   <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Delivery Address</label>
                   <textarea placeholder="Tell us exactly where in the village..." className="w-full bg-gray-50 p-4 rounded-2xl border border-gray-100 text-xs h-28 outline-none focus:border-blue-400 resize-none" onChange={e => setBookingForm({...bookingForm, address: e.target.value})} required />
               </div>
-              <div className="bg-blue-600 text-white p-5 rounded-2xl flex justify-between items-center shadow-lg shadow-blue-100">
+              <div className="bg-blue-600 text-white p-5 rounded-3xl flex justify-between items-center shadow-lg shadow-blue-100">
                 <div>
                     <p className="text-[10px] font-black opacity-70 uppercase">Daily Rate</p>
                     <p className="font-black">₹{bookingTarget.rate}</p>
                 </div>
-                <button className="bg-white text-blue-600 px-6 py-3 rounded-xl font-black text-xs uppercase shadow-sm">Send Request</button>
+                <button className="bg-white text-blue-600 px-6 py-3 rounded-xl font-black text-xs uppercase shadow-sm active:scale-95 transition-all">Send Request</button>
               </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* Floating Bottom Navigation */}
       <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white/80 backdrop-blur-lg h-24 flex items-center justify-around border-t border-gray-100 shadow-[0_-10px_40px_rgba(0,0,0,0.05)] z-50 rounded-t-[3rem] px-8">
-        <button onClick={() => setView('home')} className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all ${view === 'home' ? 'text-blue-600 bg-blue-50 shadow-inner' : 'text-gray-300'}`}><i className="fas fa-th-large text-xl"></i></button>
-        <button onClick={() => setView('bookings')} className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all ${view === 'bookings' ? 'text-blue-600 bg-blue-50 shadow-inner' : 'text-gray-300'}`}><i className="fas fa-paper-plane text-xl"></i></button>
+        <button onClick={() => setView('home')} className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all ${view === 'home' ? 'text-blue-600 bg-blue-50 shadow-inner' : 'text-gray-300 hover:text-blue-400'}`}><i className="fas fa-th-large text-xl"></i></button>
+        <button onClick={() => setView('bookings')} className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all ${view === 'bookings' ? 'text-blue-600 bg-blue-50 shadow-inner' : 'text-gray-300 hover:text-blue-400'}`}><i className="fas fa-paper-plane text-xl"></i></button>
         
-        {user.role === 'vendor' && (
+        {user?.role === UserRole.VENDOR && (
           <>
-            <button onClick={() => setView('my-services')} className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all ${view === 'my-services' ? 'text-purple-600 bg-purple-50 shadow-inner' : 'text-gray-300'}`}><i className="fas fa-warehouse text-xl"></i></button>
-            <button onClick={() => { setServiceForm({ title: '', category: 'tent', rate: '', unitType: 'Per Day', duration: '1 Day', itemsIncluded: [], contactNumber: '', _id: '', customItem: '' }); setView('vendor-dashboard'); }} className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all ${view === 'vendor-dashboard' ? 'text-purple-600 bg-purple-50 shadow-inner' : 'text-gray-300'}`}><i className="fas fa-magic text-xl"></i></button>
+            <button onClick={() => setView('my-services')} className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all ${view === 'my-services' ? 'text-purple-600 bg-purple-50 shadow-inner' : 'text-gray-300 hover:text-purple-400'}`}><i className="fas fa-warehouse text-xl"></i></button>
+            <button onClick={() => { setServiceForm({ title: '', category: 'tent', rate: '', unitType: 'Per Day', duration: '1 Day', itemsIncluded: [], contactNumber: '', _id: '', customItem: '' }); setView('vendor-dashboard'); }} className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all ${view === 'vendor-dashboard' ? 'text-purple-600 bg-purple-50 shadow-inner' : 'text-gray-300 hover:text-purple-400'}`}><i className="fas fa-magic text-xl"></i></button>
           </>
         )}
         
