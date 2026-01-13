@@ -39,14 +39,14 @@ const Vendor = mongoose.models.Vendor || mongoose.model('Vendor', new mongoose.S
 }));
 
 const Service = mongoose.models.Service || mongoose.model('Service', new mongoose.Schema({
-  vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor', index: true },
-  category: { type: String, index: true },
-  title: String,
-  unitType: { type: String, enum: ['Per Day', 'Per Piece', 'Per Sq Ft', 'Per Meter'], default: 'Per Day' },
+  vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor', index: true, required: true },
+  category: { type: String, required: true, index: true },
+  title: { type: String, required: true },
+  unitType: { type: String, default: 'Per Day' },
   rate: { type: Number, required: true },
   itemsIncluded: [String],
-  duration: { type: String, default: '1 Day' },
-  contactNumber: { type: String, required: true }, // For direct customer calls
+  description: String,
+  contactNumber: { type: String, required: true },
   createdAt: { type: Date, default: Date.now }
 }));
 
@@ -64,16 +64,12 @@ const Booking = mongoose.models.Booking || mongoose.model('Booking', new mongoos
 
 // --- ROUTES ---
 
-app.get('/', (req, res) => {
-  res.json({ status: "GramCart API v2 Active", features: ["Dual Auth", "Service Management", "Booking System"] });
-});
-
-// Auth Routes (Login/Register remain same as previous requirement)
+// Registration with check
 app.post('/api/register', async (req, res) => {
   try {
     const { name, email, mobile, password, role } = req.body;
     const existing = await User.findOne({ $or: [{ email }, { mobile }] });
-    if (existing) return res.status(400).json({ error: "User already exists" });
+    if (existing) return res.status(400).json({ error: "Mobile or Email already exists" });
 
     const user = new User({ name, email, mobile, password, role });
     await user.save();
@@ -90,31 +86,31 @@ app.post('/api/login', async (req, res) => {
   try {
     const { identifier, password } = req.body;
     const user = await User.findOne({ $or: [{ email: identifier }, { mobile: identifier }], password });
-    if (!user) return res.status(401).json({ error: "Invalid credentials" });
+    if (!user) return res.status(401).json({ error: "Invalid login credentials" });
     const token = jwt.sign({ id: user._id }, 'GRAM_SECRET_KEY');
     res.json({ token, user });
   } catch (err) { res.status(500).json({ error: "Login error" }); }
 });
 
-// --- SERVICE MANAGEMENT ---
-
+// SERVICE API (Fixed for saving)
 app.post('/api/services', async (req, res) => {
   try {
-    const service = new Service(req.body);
-    await service.save();
-    res.status(201).json(service);
-  } catch (err) { res.status(500).json({ error: "Failed to add service" }); }
+    const newService = new Service(req.body);
+    const saved = await newService.save();
+    res.status(201).json(saved);
+  } catch (err) {
+    console.error("Save error:", err);
+    res.status(400).json({ error: "Failed to save service: " + err.message });
+  }
 });
 
-// Get services for a specific vendor
 app.get('/api/my-services/:vendorId', async (req, res) => {
   try {
-    const services = await Service.find({ vendorId: req.params.vendorId });
+    const services = await Service.find({ vendorId: req.params.vendorId }).sort({ createdAt: -1 });
     res.json(services);
-  } catch (err) { res.status(500).json({ error: "Failed to fetch services" }); }
+  } catch (err) { res.status(500).json({ error: "Fetch error" }); }
 });
 
-// Update a service
 app.put('/api/services/:id', async (req, res) => {
   try {
     const service = await Service.findByIdAndUpdate(req.params.id, req.body, { new: true });
@@ -122,42 +118,36 @@ app.put('/api/services/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: "Update failed" }); }
 });
 
-// --- BOOKING SYSTEM ---
+app.get('/api/search', async (req, res) => {
+  try {
+    const { cat } = req.query;
+    const vendors = await Vendor.find().lean();
+    const results = await Promise.all(vendors.map(async (v) => {
+      let query = { vendorId: v._id };
+      if (cat) query.category = cat;
+      const services = await Service.find(query);
+      return { ...v, services };
+    }));
+    const filtered = cat ? results.filter(v => v.services.length > 0) : results;
+    res.json(filtered);
+  } catch (err) { res.status(500).json({ error: "Search error" }); }
+});
 
 app.post('/api/bookings', async (req, res) => {
   try {
     const booking = new Booking(req.body);
     await booking.save();
     res.status(201).json(booking);
-  } catch (err) { res.status(500).json({ error: "Booking failed" }); }
+  } catch (err) { res.status(500).json({ error: "Booking error" }); }
 });
 
 app.get('/api/my-bookings/:role/:id', async (req, res) => {
   try {
     const query = req.params.role === 'vendor' ? { vendorId: req.params.id } : { customerId: req.params.id };
-    const bookings = await Booking.find(query)
-      .populate('customerId', 'name mobile')
-      .populate('serviceId')
-      .populate('vendorId', 'businessName')
-      .sort({ createdAt: -1 });
+    const bookings = await Booking.find(query).populate('customerId serviceId vendorId').sort({ createdAt: -1 });
     res.json(bookings);
-  } catch (err) { res.status(500).json({ error: "Failed to fetch bookings" }); }
-});
-
-app.get('/api/search', async (req, res) => {
-  try {
-    const { cat } = req.query;
-    const vendors = await Vendor.find().lean();
-    const results = await Promise.all(vendors.map(async (v) => {
-      let serviceQuery = { vendorId: v._id };
-      if (cat) serviceQuery.category = cat;
-      const services = await Service.find(serviceQuery);
-      return { ...v, services };
-    }));
-    const filtered = cat ? results.filter(v => v.services.length > 0) : results;
-    res.json(filtered);
-  } catch (err) { res.status(500).json({ error: "Search failed" }); }
+  } catch (err) { res.status(500).json({ error: "Booking fetch error" }); }
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 GramCart v3 Server running on ${PORT}`));
