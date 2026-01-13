@@ -9,7 +9,7 @@ app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', '
 app.use(express.json({ limit: '20mb' })); 
 
 const MONGO_URI = process.env.MONGODB_URI || "mongodb+srv://biyahdaan_db_user:cUzpl0anIuBNuXb9@cluster0.hf1vhp3.mongodb.net/gramcart_db?retryWrites=true&w=majority";
-mongoose.connect(MONGO_URI).then(() => console.log("🚀 GramCart Server Ready")).catch(err => console.error("❌ DB Error:", err));
+mongoose.connect(MONGO_URI).then(() => console.log("🚀 Server Connected")).catch(err => console.error("❌ DB Error:", err));
 
 // --- Models ---
 
@@ -19,10 +19,7 @@ const UserSchema = new mongoose.Schema({
   mobile: { type: String, unique: true, required: true, index: true },
   password: { type: String, required: true },
   role: { type: String, enum: ['user', 'vendor'], default: 'user' },
-  location: { lat: Number, lng: Number },
-  savedAddress: String,
-  savedPincode: String,
-  savedAltMobile: String
+  location: { lat: Number, lng: Number }
 });
 const User = mongoose.models.User || mongoose.model('User', UserSchema);
 
@@ -46,8 +43,7 @@ const ServiceSchema = new mongoose.Schema({
   contactNumber: { type: String, required: true },
   upiId: { type: String },
   variant: { type: String, enum: ['Simple', 'Standard', 'Premium'], default: 'Simple' },
-  inventoryList: [String],
-  isActive: { type: Boolean, default: true },
+  blockedDates: [String],
   createdAt: { type: Date, default: Date.now }
 });
 const Service = mongoose.models.Service || mongoose.model('Service', ServiceSchema);
@@ -77,12 +73,11 @@ app.post('/api/register', async (req, res) => {
   try {
     const { name, email, mobile, password, role, location } = req.body;
     const existing = await User.findOne({ mobile });
-    if (existing) return res.status(400).json({ error: "Mobile already registered" });
+    if (existing) return res.status(400).json({ error: "Already registered" });
     const user = new User({ name, email, mobile, password, role, location });
     await user.save();
     if (role === 'vendor') {
-      const vendor = new Vendor({ userId: user._id, businessName: `${name}'s Shop`, location });
-      await vendor.save();
+      await new Vendor({ userId: user._id, businessName: `${name}'s Shop`, location }).save();
     }
     res.status(201).json({ user });
   } catch (err) { res.status(400).json({ error: err.message }); }
@@ -92,16 +87,14 @@ app.post('/api/login', async (req, res) => {
   try {
     const { identifier, password } = req.body;
     const user = await User.findOne({ $or: [{ email: identifier }, { mobile: identifier }], password });
-    if (!user) return res.status(401).json({ error: "Invalid login details" });
+    if (!user) return res.status(401).json({ error: "Invalid login" });
     res.json({ user });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/services', async (req, res) => {
   try {
-    const { _id, ...data } = req.body;
-    if (!mongoose.Types.ObjectId.isValid(data.vendorId)) return res.status(400).json({ error: "Invalid Vendor ID format" });
-    const service = new Service(data);
+    const service = new Service(req.body);
     await service.save();
     res.status(201).json(service);
   } catch (err) { res.status(400).json({ error: err.message }); }
@@ -167,6 +160,8 @@ app.patch('/api/bookings/:id/status', async (req, res) => {
     const booking = await Booking.findByIdAndUpdate(req.params.id, req.body, { new: true });
     if (req.body.status === 'completed') {
       await Vendor.findByIdAndUpdate(booking.vendorId, { $inc: { totalEarnings: booking.totalAmount } });
+      // Auto-block the dates on service when completed
+      await Service.findByIdAndUpdate(booking.serviceId, { $addToSet: { blockedDates: booking.startDate.toISOString().split('T')[0] } });
     }
     res.json(booking);
   } catch (err) { res.status(500).json({ error: err.message }); }
