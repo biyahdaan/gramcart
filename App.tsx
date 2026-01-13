@@ -133,6 +133,7 @@ const AdminDashboard = ({ adminSettings, setAdminSettings, updateBookingStatus, 
 const App: React.FC = () => {
   const [showSplash, setShowSplash] = useState(true);
   const [isOtherCategory, setIsOtherCategory] = useState(false);
+  const [isForgotMode, setIsForgotMode] = useState(false);
 
   const [lang, setLang] = useState<Language>(Language.EN);
   const [user, setUser] = useState<User | null>(null);
@@ -324,12 +325,28 @@ const App: React.FC = () => {
         return;
     }
     setLoading(true);
+
+    if (isForgotMode) {
+        try {
+            const res = await fetch(`${API_BASE_URL}/reset-password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mobile: authForm.mobile, newPassword: authForm.password })
+            });
+            const result = await res.json();
+            if (res.ok) {
+                alert("Password Updated! Please Login.");
+                setIsForgotMode(false);
+            } else alert(result.error);
+        } catch (e) {} finally { setLoading(false); }
+        return;
+    }
+
     if (isAdminMode) {
         try {
             const res = await fetch(`${API_BASE_URL}/admin/settings`);
             const settings = await res.json();
             if (authForm.password === settings.password) {
-                // For admin login, we still need a token. Using standard login route as admin.
                 const loginRes = await fetch(`${API_BASE_URL}/login`, { 
                     method: 'POST', 
                     headers: { 'Content-Type': 'application/json' }, 
@@ -506,28 +523,46 @@ const App: React.FC = () => {
       <div className="max-w-md mx-auto min-h-screen bg-[#2874f0] flex items-center justify-center p-6">
         <div className="bg-white w-full p-8 rounded-[2rem] shadow-2xl animate-slideUp">
           <div className="text-center mb-8"><h1 className="text-4xl font-black text-[#2874f0] italic tracking-tighter">GramCart</h1></div>
+          
           <form onSubmit={handleAuth} className="space-y-4">
-            {authMode === 'register' && !isAdminMode && (
-              <><input placeholder="Full Name" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" onChange={e => setAuthForm({...authForm, name: e.target.value})} required /><input placeholder="Mobile Number" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" onChange={e => setAuthForm({...authForm, mobile: e.target.value})} required /></>
-            )}
-            {!isAdminMode && (
-                <input placeholder="Email or Mobile" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" value={authForm.identifier} onChange={e => setAuthForm({...authForm, identifier: e.target.value})} required />
-            )}
-            {(authMode === 'login' || isAdminMode) && (
-                <input placeholder={isAdminMode ? "System Master Password" : "Password"} type="password" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" onChange={e => setAuthForm({...authForm, password: e.target.value})} required />
-            )}
-            {authMode === 'register' && !isAdminMode && (
-              <div className="flex gap-2 p-1 bg-gray-50 rounded-xl">
-                {['user', 'vendor'].map(r => (
-                  <button key={r} type="button" onClick={() => setAuthForm({...authForm, role: r})} className={`flex-1 py-2 rounded-lg text-xs font-black ${authForm.role === r ? 'bg-[#2874f0] text-white shadow-lg' : 'text-gray-400'}`}>{r.toUpperCase()}</button>
-                ))}
+            {isForgotMode ? (
+              <div className="animate-slideIn space-y-4">
+                 <h2 className="text-center font-black text-xs uppercase text-gray-400 mb-2">Reset Your Password</h2>
+                 <input placeholder="Registered Mobile Number" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" onChange={e => setAuthForm({...authForm, mobile: e.target.value})} required />
+                 <input placeholder="Enter New Password" type="password" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" onChange={e => setAuthForm({...authForm, password: e.target.value})} required />
+                 <button className="w-full py-5 rounded-xl font-black text-white bg-[#2874f0] shadow-xl uppercase text-xs tracking-widest">{loading ? 'Processing...' : 'Reset Password'}</button>
+                 <p className="text-center mt-4 text-[11px] font-black text-gray-400 cursor-pointer" onClick={() => setIsForgotMode(false)}>Back to Login</p>
               </div>
+            ) : (
+              <>
+                {authMode === 'register' && !isAdminMode && (
+                  <><input placeholder="Full Name" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" onChange={e => setAuthForm({...authForm, name: e.target.value})} required /><input placeholder="Mobile Number" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" onChange={e => setAuthForm({...authForm, mobile: e.target.value})} required /></>
+                )}
+                {!isAdminMode && (
+                    <input placeholder="Email or Mobile" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" value={authForm.identifier} onChange={e => setAuthForm({...authForm, identifier: e.target.value})} required />
+                )}
+                {(authMode === 'login' || isAdminMode) && (
+                    <div className="space-y-2">
+                        <input placeholder={isAdminMode ? "System Master Password" : "Password"} type="password" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" onChange={e => setAuthForm({...authForm, password: e.target.value})} required />
+                        {!isAdminMode && authMode === 'login' && (
+                            <p onClick={() => setIsForgotMode(true)} className="text-right text-[10px] font-black text-gray-400 cursor-pointer px-1">Forgot Password?</p>
+                        )}
+                    </div>
+                )}
+                {authMode === 'register' && !isAdminMode && (
+                  <div className="flex gap-2 p-1 bg-gray-50 rounded-xl">
+                    {['user', 'vendor'].map(r => (
+                      <button key={r} type="button" onClick={() => setAuthForm({...authForm, role: r})} className={`flex-1 py-2 rounded-lg text-xs font-black ${authForm.role === r ? 'bg-[#2874f0] text-white shadow-lg' : 'text-gray-400'}`}>{r.toUpperCase()}</button>
+                    ))}
+                  </div>
+                )}
+                <button className="w-full py-5 rounded-xl font-black text-white bg-[#fb641b] shadow-xl uppercase text-xs tracking-widest">{loading ? 'Please wait...' : (isAdminMode ? 'System Access' : (authMode === 'login' ? 'Login' : 'Sign Up'))}</button>
+                {!isAdminMode && (
+                  <p className="text-center mt-6 text-[11px] font-black text-[#2874f0] cursor-pointer" onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}>{authMode === 'login' ? "New User? Register Now" : "Back to Login"}</p>
+                )}
+              </>
             )}
-            <button className="w-full py-5 rounded-xl font-black text-white bg-[#fb641b] shadow-xl uppercase text-xs tracking-widest">{loading ? 'Please wait...' : (isAdminMode ? 'System Access' : (authMode === 'login' ? 'Login' : 'Sign Up'))}</button>
           </form>
-          {!isAdminMode && (
-            <p className="text-center mt-6 text-[11px] font-black text-[#2874f0] cursor-pointer" onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}>{authMode === 'login' ? "New User? Register Now" : "Back to Login"}</p>
-          )}
         </div>
       </div>
     );

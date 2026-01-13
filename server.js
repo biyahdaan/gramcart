@@ -127,6 +127,23 @@ app.post('/api/login', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// --- NEW RESET PASSWORD ROUTE ---
+app.post('/api/reset-password', async (req, res) => {
+  try {
+    const { mobile, newPassword } = req.body;
+    const user = await User.findOne({ mobile });
+    if (!user) return res.status(404).json({ error: "Mobile number not registered" });
+
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(newPassword, salt);
+    
+    user.password = hashedPassword;
+    await user.save();
+    
+    res.json({ success: true, message: "Password updated successfully" });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.post('/api/services', authenticate(['vendor']), async (req, res) => {
   try {
     const service = new Service(req.body);
