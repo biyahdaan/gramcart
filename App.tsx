@@ -225,7 +225,6 @@ const App: React.FC = () => {
     } catch (e) { alert("Save failed"); setLoading(false); }
   };
 
-  // --- RECOVERY: Restored Full Booking & UPI Logic ---
   const handleBooking = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !bookingTarget) return;
@@ -311,7 +310,6 @@ const App: React.FC = () => {
     localStorage.setItem(`wish_${user._id || user.id}`, JSON.stringify(newWish));
   };
 
-  // --- UI Components ---
   const Stepper = ({ status }: { status: string }) => {
     const steps = ['pending', 'approved', 'advance_paid', 'final_paid', 'completed'];
     const map: Record<string, string> = { 'awaiting_advance_verification': 'approved', 'awaiting_final_verification': 'advance_paid' };
@@ -425,6 +423,44 @@ const App: React.FC = () => {
                   <i className="fas fa-wallet absolute -bottom-4 -right-4 text-white/10 text-9xl"></i>
               </div>
 
+              {/* NEW FEATURE: Withdrawal & Settlement Hub */}
+              <div className="bg-white p-6 rounded-[2.5rem] shadow-sm mb-6 border border-green-50">
+                  <div className="flex justify-between items-center mb-4">
+                      <h3 className="font-black uppercase text-[10px] tracking-widest text-gray-400">Settlement Hub</h3>
+                      <i className="fas fa-university text-green-500"></i>
+                  </div>
+                  <div className="space-y-4">
+                      <div className="flex flex-col gap-2">
+                          <p className="text-[9px] font-black text-gray-400 uppercase ml-1">Your Payout UPI ID</p>
+                          <input 
+                              placeholder="example@upi" 
+                              className="bg-gray-50 p-4 rounded-xl text-xs font-black border-none shadow-inner"
+                              value={vendorProfile?.upiId || ''}
+                              onChange={(e) => setVendorProfile({...vendorProfile, upiId: e.target.value})}
+                          />
+                      </div>
+                      <button 
+                          onClick={async () => {
+                              if(!vendorProfile?.upiId) return alert("Please enter UPI ID first");
+                              setLoading(true);
+                              try {
+                                const res = await fetch(`${API_BASE_URL}/vendors/${vendorProfile._id}`, {
+                                    method: 'PATCH',
+                                    headers: {'Content-Type': 'application/json'},
+                                    body: JSON.stringify({ upiId: vendorProfile.upiId })
+                                });
+                                if(res.ok) alert("Withdrawal Request Initiated & Payout UPI Saved!");
+                              } catch(e) { alert("Update failed"); }
+                              setLoading(false);
+                          }}
+                          className="w-full bg-green-500 text-white py-4 rounded-xl text-[10px] font-black uppercase shadow-lg shadow-green-100"
+                      >
+                          {loading ? 'Processing...' : 'Withdraw to UPI'}
+                      </button>
+                      <p className="text-[8px] text-center text-gray-400 font-bold italic tracking-tighter">Verified earnings are settled within 24 hours.</p>
+                  </div>
+              </div>
+
               <div className="bg-white p-6 rounded-[2.5rem] shadow-sm">
                   <div className="flex justify-between items-center mb-6">
                       <h3 className="font-black uppercase text-xs tracking-widest">Listings</h3>
@@ -504,7 +540,7 @@ const App: React.FC = () => {
            <div className="space-y-6">
                <h2 className="text-xl font-black text-gray-800 border-l-8 border-[#fb641b] pl-4 mb-6 uppercase tracking-tighter">My Orders</h2>
                {bookings.map(b => (
-                  <div key={b._id} className="bg-white p-6 rounded-[2.5rem] shadow-sm mb-6 border border-gray-50">
+                  <div key={b._id} className="bg-white p-6 rounded-[2.5rem] shadow-sm mb-6 border border-gray-100">
                       <div className="flex justify-between items-start mb-6">
                           <div>
                               <p className="text-[9px] font-black text-[#2874f0] uppercase tracking-widest mb-1">{b.serviceId?.title}</p>

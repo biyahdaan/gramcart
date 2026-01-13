@@ -26,7 +26,7 @@ const User = mongoose.models.User || mongoose.model('User', UserSchema);
 const VendorSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', unique: true },
   businessName: { type: String, required: true, index: true },
-  upiId: { type: String, default: 'merchant@upi' },
+  upiId: { type: String, default: '' },
   location: { lat: Number, lng: Number },
   totalEarnings: { type: Number, default: 0 }
 });
@@ -155,13 +155,35 @@ app.get('/api/my-bookings/:role/:id', async (req, res) => {
 
 app.patch('/api/bookings/:id/status', async (req, res) => {
   try {
+    const { status } = req.body;
     const booking = await Booking.findByIdAndUpdate(req.params.id, req.body, { new: true });
-    if (req.body.status === 'completed') {
+
+    // NEW LOGIC: Automatic Date Blocking on Approval
+    if (status === 'approved') {
+        const startDate = new Date(booking.startDate);
+        const endDate = new Date(booking.endDate);
+        const dateArray = [];
+        let curr = new Date(startDate);
+        while(curr <= endDate) {
+            dateArray.push(curr.toISOString().split('T')[0]);
+            curr.setDate(curr.getDate() + 1);
+        }
+        await Service.findByIdAndUpdate(booking.serviceId, { $addToSet: { blockedDates: { $each: dateArray } } });
+    }
+
+    if (status === 'completed') {
       await Vendor.findByIdAndUpdate(booking.vendorId, { $inc: { totalEarnings: booking.totalAmount } });
-      await Service.findByIdAndUpdate(booking.serviceId, { $addToSet: { blockedDates: booking.startDate.toISOString().split('T')[0] } });
     }
     res.json(booking);
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// NEW ROUTE: Update Vendor Payout Info (UPI)
+app.patch('/api/vendors/:id', async (req, res) => {
+    try {
+        const vendor = await Vendor.findByIdAndUpdate(req.params.id, { upiId: req.body.upiId }, { new: true });
+        res.json(vendor);
+    } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.listen(5000, () => console.log('🚀 Server active on 5000'));
