@@ -22,7 +22,7 @@ const UserSchema = new mongoose.Schema({
   mobile: { type: String, unique: true, required: true, index: true },
   password: { type: String, required: true },
   role: { type: String, enum: ['user', 'vendor'], default: 'user' },
-  location: { lat: Number, lng: Number } // User location for hyper-local logic
+  location: { lat: Number, lng: Number } 
 });
 const User = mongoose.models.User || mongoose.model('User', UserSchema);
 
@@ -31,7 +31,7 @@ const VendorSchema = new mongoose.Schema({
   businessName: { type: String, required: true, index: true },
   rating: { type: Number, default: 5 },
   upiId: { type: String, default: 'merchant@upi' },
-  location: { lat: Number, lng: Number }, // Vendor location for 25KM logic
+  location: { lat: Number, lng: Number }, 
   advancePercent: { type: Number, default: 10 }
 });
 const Vendor = mongoose.models.Vendor || mongoose.model('Vendor', VendorSchema);
@@ -59,7 +59,7 @@ const BookingSchema = new mongoose.Schema({
   address: String,
   totalAmount: Number,
   advanceProof: String,
-  otp: { type: String, required: true }, // OTP for delivery completion
+  otp: { type: String, required: true }, 
   status: { 
     type: String, 
     enum: ['pending', 'approved', 'advance_paid', 'completed', 'rejected'], 
@@ -75,7 +75,7 @@ app.post('/api/register', async (req, res) => {
   try {
     const { name, email, mobile, password, role, location } = req.body;
     const existing = await User.findOne({ $or: [{ email }, { mobile }] });
-    if (existing) return res.status(400).json({ error: "Mobile or Email already registered" });
+    if (existing) return res.status(400).json({ error: "Mobile/Email already registered" });
     const user = new User({ name, email, mobile, password, role, location });
     await user.save();
     if (role === 'vendor') {
@@ -91,7 +91,7 @@ app.post('/api/login', async (req, res) => {
   try {
     const { identifier, password } = req.body;
     const user = await User.findOne({ $or: [{ email: identifier }, { mobile: identifier }], password });
-    if (!user) return res.status(401).json({ error: "Invalid login" });
+    if (!user) return res.status(401).json({ error: "Invalid credentials" });
     res.json({ user });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -102,6 +102,20 @@ app.post('/api/services', async (req, res) => {
     await service.save();
     res.status(201).json(service);
   } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.put('/api/services/:id', async (req, res) => {
+    try {
+      const service = await Service.findByIdAndUpdate(req.params.id, req.body, { new: true });
+      res.json(service);
+    } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
+app.delete('/api/services/:id', async (req, res) => {
+    try {
+      await Service.findByIdAndDelete(req.params.id);
+      res.json({ success: true });
+    } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.get('/api/search', async (req, res) => {
@@ -136,9 +150,13 @@ app.post('/api/bookings', async (req, res) => {
 app.get('/api/my-bookings/:role/:id', async (req, res) => {
   try {
     const { role, id } = req.params;
-    let query = (role === 'vendor') 
-      ? { vendorId: await Vendor.findOne({ userId: id }) } 
-      : { customerId: id };
+    let query = {};
+    if (role === 'vendor') {
+        const v = await Vendor.findOne({ userId: id });
+        query = { vendorId: v ? v._id : null };
+    } else {
+        query = { customerId: id };
+    }
     const bookings = await Booking.find(query).populate('serviceId').populate('vendorId').populate('customerId').sort({ createdAt: -1 });
     res.json(bookings);
   } catch (err) { res.status(500).json({ error: err.message }); }
