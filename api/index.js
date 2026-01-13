@@ -23,10 +23,9 @@ const connectDB = async () => {
   }
 };
 
-// --- Models ---
 const UserSchema = new mongoose.Schema({
   name: String,
-  email: { type: String, unique: true, index: true },
+  email: { type: String, unique: true, index: true, sparse: true },
   mobile: { type: String, unique: true, index: true },
   password: { type: String, required: true },
   role: { type: String, default: 'user' },
@@ -45,7 +44,6 @@ const VendorSchema = new mongoose.Schema({
 });
 const Vendor = mongoose.models.Vendor || mongoose.model('Vendor', VendorSchema);
 
-// --- Routes ---
 app.post('/api/login', async (req, res) => {
   await connectDB();
   try {
@@ -53,20 +51,14 @@ app.post('/api/login', async (req, res) => {
     const user = await User.findOne({ 
       $or: [{ email: identifier }, { mobile: identifier }] 
     });
-
     if (!user) return res.status(401).json({ error: "User not found" });
-
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) return res.status(401).json({ error: "Invalid credentials" });
-
     const token = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET);
-    
-    // CRITICAL FIX: Fetch Vendor Profile if user is a vendor
     let vendorData = null;
     if (user.role === 'vendor') {
       vendorData = await Vendor.findOne({ userId: user._id });
     }
-
     res.json({ token, user, vendor: vendorData });
   } catch (err) {
     res.status(500).json({ error: "Login failed" });
@@ -77,20 +69,18 @@ app.post('/api/register', async (req, res) => {
   await connectDB();
   try {
     const { name, email, mobile, password, role, location } = req.body;
-    
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
-
+    const finalEmail = (email && email.trim() !== "") ? email : undefined;
     const user = new User({
       name,
-      email,
+      email: finalEmail,
       mobile,
       password: hashedPassword,
       role: role || 'user',
       location
     });
     await user.save();
-    
     if (user.role === 'vendor') {
       const vendor = new Vendor({ 
         userId: user._id, 
@@ -99,11 +89,10 @@ app.post('/api/register', async (req, res) => {
       });
       await vendor.save();
     }
-    
     const token = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET);
     res.json({ token, user });
   } catch (err) {
-    res.status(400).json({ error: "Registration failed: User may already exist" });
+    res.status(400).json({ error: "Registration failed: Mobile may already exist" });
   }
 });
 

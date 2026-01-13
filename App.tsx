@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Language, User, Translations, UserRole, Translation } from './types';
-import { CATEGORIES as INITIAL_CATEGORIES, GLOBAL_CATEGORIES } from './constants';
+import { CATEGORIES as INITIAL_CATEGORIES, GLOBAL_CATEGORIES, BANNERS } from './constants';
 import { LanguageSwitch } from './components/LanguageSwitch';
 
 const API_BASE_URL = "https://biyahdaan.onrender.com/api"; 
@@ -367,7 +367,10 @@ const App: React.FC = () => {
         } catch (err) { setLoading(false); return; }
     }
     const endpoint = authMode === 'login' ? '/login' : '/register';
-    const payload = authMode === 'login' ? { identifier: authForm.identifier, password: authForm.password } : { ...authForm, location: userCoords };
+    const payload = authMode === 'login' 
+        ? { identifier: authForm.identifier, password: authForm.password } 
+        : { ...authForm, identifier: authForm.mobile, location: userCoords };
+        
     try {
       const res = await fetch(`${API_BASE_URL}${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const result = await res.json();
@@ -382,148 +385,78 @@ const App: React.FC = () => {
     } catch (err) {} finally { setLoading(false); }
   };
 
-  const handleAddOrUpdateService = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!serviceForm.contactNumber || serviceForm.contactNumber.length < 10) {
-        alert("❌ COMPULSORY: Please add a valid 10-digit mobile number to list this service.");
-        return;
-    }
-    if (!user || !token) return alert("Please login");
-    setLoading(true); setPublishStatus('Syncing Service...');
+  const updateBookingStatus = async (id: string, update: any) => {
     try {
-      const compressedImages = await Promise.all(serviceForm.images.map(img => img.startsWith('data:image') ? compressImage(img) : img));
-      const vRes = await fetch(`${API_BASE_URL}/search`);
-      const allV = await vRes.json();
-      const v = allV.find((vend: any) => vend.userId === (user._id || user.id));
-      if (!v) throw new Error("Profile missing");
-
-      const payload: any = {
-        ...serviceForm, 
-        images: compressedImages, 
-        vendorId: v._id,
-        rate: Number(serviceForm.rate)
-      };
-      
-      const isUpdating = !!serviceForm._id && serviceForm._id.trim() !== "";
-      if (!isUpdating) delete payload._id;
-
-      const endpoint = isUpdating ? `${API_BASE_URL}/services/${serviceForm._id}` : `${API_BASE_URL}/services`;
-      const res = await fetch(endpoint, {
-        method: isUpdating ? 'PUT' : 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify(payload)
-      });
-
-      if (res.ok) {
-        setPublishStatus('Live!');
-        setTimeout(() => {
-          setServiceForm({ title: '', category: 'tent', description: '', rate: '', unitType: 'Per Day', inventoryList: [], images: [], contactNumber: '', _id: '', upiId: '', variant: 'Simple', blockedDates: [] });
-          setPublishStatus(''); fetchMyServices(); setView('vendor-dashboard'); setLoading(false);
-          setIsOtherCategory(false);
-        }, 1500);
-      } else {
-          const errData = await res.json();
-          alert(`Error: ${errData.error || 'Server error'}`);
-          setLoading(false); setPublishStatus('');
-      }
-    } catch (e) { alert("Save failed"); setLoading(false); setPublishStatus(''); }
+        const res = await fetch(`${API_BASE_URL}/bookings/${id}/status`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify(update)
+        });
+        if (res.ok) fetchBookings();
+    } catch (e) {}
   };
 
-  const handleBooking = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user || !token || !bookingTarget) return;
-    setLoading(true);
-    try {
-      const vRes = await fetch(`${API_BASE_URL}/search`);
-      const allV = await vRes.json();
-      const v = allV.find((vend: any) => vend.services.some((s: any) => s._id === bookingTarget._id));
-      const res = await fetch(`${API_BASE_URL}/bookings`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ 
-          ...bookingForm, 
-          customerId: user._id || user.id, 
-          vendorId: v._id, 
-          serviceId: bookingTarget._id, 
-          totalAmount: bookingTarget.rate, 
-          otp: Math.floor(1000 + Math.random() * 9000).toString() 
-        })
-      });
-      if (res.ok) { setBookingTarget(null); setView('bookings'); fetchBookings(); }
-      else { const errData = await res.json(); alert(errData.error); }
-    } catch (e) {} finally { setLoading(false); }
-  };
-
-  const handleProofUpload = (e: React.ChangeEvent<HTMLInputElement>, bookingId: string, field: 'advanceProof' | 'finalProof') => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>, isService: boolean, isProof: boolean = false, isFinal: boolean = false) => {
     const file = e.target.files?.[0];
-    if (!file || !token) return;
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      setLoading(true);
-      const compressed = await compressImage(reader.result as string);
-      const status = field === 'advanceProof' ? 'awaiting_advance_verification' : 'awaiting_final_verification';
-      await fetch(`${API_BASE_URL}/bookings/${bookingId}/status`, { 
-        method: 'PATCH', 
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, 
-        body: JSON.stringify({ [field]: compressed, status }) 
-      });
-      fetchBookings(); setLoading(false);
-    };
-    reader.readAsDataURL(file);
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = async () => {
+        const compressed = await compressImage(reader.result as string);
+        if (isProof) setBookingTarget({...bookingTarget, advanceProof: compressed});
+        else if (isFinal) setBookingTarget({...bookingTarget, finalProof: compressed});
+        else if (isService) setServiceForm({...serviceForm, images: [...serviceForm.images, compressed]});
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
-  const updateBookingStatus = async (id: string, payload: any) => {
-    if(!token) return;
+  const submitBooking = async () => {
+    if (!bookingForm.startDate || !bookingForm.endDate || !bookingForm.address || !bookingForm.pincode) return alert("Fill all details");
     setLoading(true);
+    const otp = Math.floor(1000 + Math.random() * 9000).toString();
+    const payload = {
+        customerId: user?._id || user?.id,
+        vendorId: bookingTarget.vendorId,
+        serviceId: bookingTarget._id,
+        ...bookingForm,
+        totalAmount: bookingTarget.rate,
+        otp,
+        status: 'pending'
+    };
     try {
-      const res = await fetch(`${API_BASE_URL}/bookings/${id}/status`, { 
-        method: 'PATCH', 
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }, 
-        body: JSON.stringify(payload) 
-      });
-      if (res.ok) fetchBookings();
+        const res = await fetch(`${API_BASE_URL}/bookings`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+            body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+            alert("Booking Request Sent Successfully!");
+            setBookingTarget(null);
+            setView('bookings');
+        } else {
+            const err = await res.json();
+            alert(err.error || "Booking Failed");
+        }
     } catch (e) {} finally { setLoading(false); }
   };
 
-  const handleVendorVerification = async (bookingId: string, nextStatus: string) => {
-    await updateBookingStatus(bookingId, { status: nextStatus, isVerified: true });
-    alert("Payment Verified Successfully!");
-  };
+  const t = Translations[lang];
 
-  const toggleWishlist = (id: string) => {
-    if (!user) return;
-    const newWish = wishlist.includes(id) ? wishlist.filter(i => i !== id) : [...wishlist, id];
-    setWishlist(newWish);
-    localStorage.setItem(`wish_${user._id || user.id}`, JSON.stringify(newWish));
-  };
-
-  const Stepper = ({ status }: { status: string }) => {
-    const steps = ['pending', 'approved', 'advance_paid', 'final_paid', 'completed'];
-    const map: Record<string, string> = { 'awaiting_advance_verification': 'approved', 'awaiting_final_verification': 'advance_paid' };
-    const currentIndex = steps.indexOf(map[status] || status);
+  if (showSplash) {
     return (
-      <div className="flex items-center justify-between w-full mb-8 relative px-2">
-        <div className="absolute top-[14px] left-0 right-0 h-[1px] bg-gray-100 -z-10"></div>
-        {steps.map((step, idx) => (
-          <div key={step} className="flex flex-col items-center flex-1">
-            <div className={`w-7 h-7 rounded-full border-4 border-white shadow-sm flex items-center justify-center text-[8px] font-black ${idx <= currentIndex ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-400'}`}>
-              {idx < currentIndex ? <i className="fas fa-check"></i> : idx + 1}
-            </div>
-            <span className={`text-[6px] mt-2 font-black uppercase ${idx <= currentIndex ? 'text-green-600' : 'text-gray-300'}`}>{step.split('_')[0]}</span>
-          </div>
-        ))}
+      <div className="fixed inset-0 bg-[#2874f0] flex flex-col items-center justify-center z-[1000] text-white">
+        <h1 className="text-6xl font-black italic tracking-tighter mb-4 animate-bounce">GramCart</h1>
+        <div className="w-12 h-12 border-4 border-white/30 border-t-white rounded-full animate-spin"></div>
+        <p className="mt-6 font-black uppercase text-[10px] tracking-widest opacity-80">RURAL HYPER-LOCAL COMMERCE</p>
       </div>
     );
-  };
-
-  const pendingCount = bookings.filter(b => b.status === 'pending').length;
+  }
 
   if (!user) {
     return (
       <div className="max-w-md mx-auto min-h-screen bg-[#2874f0] flex items-center justify-center p-6">
         <div className="bg-white w-full p-8 rounded-[2rem] shadow-2xl animate-slideUp">
           <div className="text-center mb-8"><h1 className="text-4xl font-black text-[#2874f0] italic tracking-tighter">GramCart</h1></div>
-          
           <form onSubmit={handleAuth} className="space-y-4">
             {isForgotMode ? (
               <div className="animate-slideIn space-y-4">
@@ -536,18 +469,21 @@ const App: React.FC = () => {
             ) : (
               <>
                 {authMode === 'register' && !isAdminMode && (
-                  <><input placeholder="Full Name" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" onChange={e => setAuthForm({...authForm, name: e.target.value})} required /><input placeholder="Mobile Number" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" onChange={e => setAuthForm({...authForm, mobile: e.target.value})} required /></>
+                  <div className="space-y-4 animate-slideIn">
+                    <input placeholder="Full Name" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" onChange={e => setAuthForm({...authForm, name: e.target.value})} required />
+                    <input placeholder="Mobile Number" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" onChange={e => setAuthForm({...authForm, mobile: e.target.value})} required />
+                  </div>
                 )}
-                {!isAdminMode && (
-                    <input placeholder="Email or Mobile" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" value={authForm.identifier} onChange={e => setAuthForm({...authForm, identifier: e.target.value})} required />
+                {!isAdminMode && authMode === 'login' && (
+                  <input placeholder="Email or Mobile" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" value={authForm.identifier} onChange={e => setAuthForm({...authForm, identifier: e.target.value})} required />
                 )}
-                {(authMode === 'login' || isAdminMode) && (
-                    <div className="space-y-2">
-                        <input placeholder={isAdminMode ? "System Master Password" : "Password"} type="password" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" onChange={e => setAuthForm({...authForm, password: e.target.value})} required />
-                        {!isAdminMode && authMode === 'login' && (
-                            <p onClick={() => setIsForgotMode(true)} className="text-right text-[10px] font-black text-gray-400 cursor-pointer px-1">Forgot Password?</p>
-                        )}
-                    </div>
+                {(authMode === 'login' || isAdminMode || authMode === 'register') && (
+                  <div className="space-y-2">
+                    <input placeholder={isAdminMode ? "System Master Password" : "Password"} type="password" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" onChange={e => setAuthForm({...authForm, password: e.target.value})} required />
+                    {!isAdminMode && authMode === 'login' && (
+                      <p onClick={() => setIsForgotMode(true)} className="text-right text-[10px] font-black text-gray-400 cursor-pointer px-1">Forgot Password?</p>
+                    )}
+                  </div>
                 )}
                 {authMode === 'register' && !isAdminMode && (
                   <div className="flex gap-2 p-1 bg-gray-50 rounded-xl">
@@ -556,9 +492,13 @@ const App: React.FC = () => {
                     ))}
                   </div>
                 )}
-                <button className="w-full py-5 rounded-xl font-black text-white bg-[#fb641b] shadow-xl uppercase text-xs tracking-widest">{loading ? 'Please wait...' : (isAdminMode ? 'System Access' : (authMode === 'login' ? 'Login' : 'Sign Up'))}</button>
+                <button className="w-full py-5 rounded-xl font-black text-white bg-[#fb641b] shadow-xl uppercase text-xs tracking-widest">
+                  {loading ? 'Please wait...' : (isAdminMode ? 'System Access' : (authMode === 'login' ? 'Login' : 'Sign Up'))}
+                </button>
                 {!isAdminMode && (
-                  <p className="text-center mt-6 text-[11px] font-black text-[#2874f0] cursor-pointer" onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}>{authMode === 'login' ? "New User? Register Now" : "Back to Login"}</p>
+                  <p className="text-center mt-6 text-[11px] font-black text-[#2874f0] cursor-pointer" onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}>
+                    {authMode === 'login' ? "New User? Register Now" : "Back to Login"}
+                  </p>
                 )}
               </>
             )}
@@ -570,459 +510,585 @@ const App: React.FC = () => {
 
   return (
     <div className="max-w-md mx-auto min-h-screen bg-[#f1f3f6] pb-24 relative overflow-x-hidden">
-      {showSplash && (
-        <div className="fixed inset-0 bg-gradient-to-br from-[#2874f0] to-[#1e5bb8] z-[9999] flex flex-col items-center justify-center animate-pulse">
-            <div className="text-center animate-bounce">
-            <h1 className="text-6xl font-black text-white italic tracking-tighter drop-shadow-2xl">GramCart</h1>
-            <p className="text-white/70 text-[10px] font-black uppercase tracking-[0.3em] mt-4">Rural Hyper-local Marketplace</p>
-            </div>
-            <div className="absolute bottom-12 flex gap-2">
-            <div className="w-2 h-2 bg-white rounded-full animate-bounce delay-75"></div>
-            <div className="w-2 h-2 bg-white rounded-full animate-bounce delay-150"></div>
-            <div className="w-2 h-2 bg-white rounded-full animate-bounce delay-300"></div>
-            </div>
-        </div>
-      )}
-
       <header className="bg-[#2874f0] p-4 text-white sticky top-0 z-[100] shadow-md rounded-b-[1.5rem]">
         <div className="flex justify-between items-center mb-4">
-          <div className="flex items-center gap-3"><i className="fas fa-bars text-xl"></i><h1 className="text-2xl font-black italic tracking-tighter">GramCart</h1></div>
+          <div className="flex items-center gap-2">
+            <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center shadow-lg"><i className="fas fa-shopping-cart text-[#2874f0] text-xl"></i></div>
+            <h1 className="text-xl font-black italic tracking-tighter">GramCart</h1>
+          </div>
           <div className="flex items-center gap-3">
-             {user.role === UserRole.VENDOR && (
-                 <div className="relative cursor-pointer mr-1" onClick={() => setView('bookings')}>
-                    <i className="fas fa-bell text-lg"></i>
-                    {pendingCount > 0 && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[7px] font-bold w-3 h-3 flex items-center justify-center rounded-full animate-bounce">{pendingCount}</span>}
-                 </div>
-             )}
-             <LanguageSwitch current={lang} onChange={setLang} />
+            <LanguageSwitch current={lang} onChange={setLang} />
+            <button onClick={handleLogout} className="bg-white/20 w-10 h-10 rounded-xl flex items-center justify-center backdrop-blur-md"><i className="fas fa-power-off text-white"></i></button>
           </div>
         </div>
-        {user.role !== UserRole.ADMIN && (
-            <div className="relative">
-                <input placeholder={Translations[lang].searchPlaceholder} className="w-full bg-white text-gray-800 p-4 pl-12 pr-14 rounded-xl text-sm outline-none font-bold" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}/>
-                <i className="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-300"></i>
-                <button onClick={startVoiceSearch} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#2874f0] w-10 h-10 flex items-center justify-center bg-gray-50 rounded-full shadow-md"><i className={`fas fa-microphone ${isListening ? 'text-red-500 animate-pulse' : ''}`}></i></button>
-            </div>
-        )}
+        <div className="relative group">
+          <input 
+            className="w-full bg-white text-gray-800 p-4 rounded-2xl pl-12 text-sm font-bold shadow-inner outline-none transition-all group-focus-within:ring-4 group-focus-within:ring-white/20"
+            placeholder={t.searchPlaceholder}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+          <i className="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-400"></i>
+          <button onClick={startVoiceSearch} className={`absolute right-4 top-1/2 -translate-y-1/2 ${isListening ? 'text-red-500 animate-pulse' : 'text-blue-500'}`}><i className="fas fa-microphone"></i></button>
+        </div>
       </header>
 
-      <main className="p-4">
-        {user.role === UserRole.ADMIN ? (
-            <AdminDashboard adminSettings={adminSettings} setAdminSettings={setAdminSettings} updateBookingStatus={updateBookingStatus} token={token} />
-        ) : (
-          <>
-            {view === 'home' && (
-              <div className="space-y-6">
-                <div className="flex gap-4 overflow-x-auto no-scrollbar py-2">
-                    {categories.map(c => (
-                        <button key={c.id} onClick={() => fetchData(c.id)} className="flex flex-col items-center gap-2 min-w-[85px]">
-                            <div className={`w-14 h-14 rounded-2xl ${c.color} flex items-center justify-center shadow-md border-2 border-white`}><i className={`fas ${c.icon} text-lg`}></i></div>
-                            <span className="text-[9px] font-black text-gray-500 uppercase tracking-widest">{c.name}</span>
-                        </button>
-                    ))}
-                </div>
-                {filteredData.map(vendor => (
-                  <div key={vendor._id} className="bg-white p-5 rounded-[2rem] shadow-sm border border-gray-100 mb-6">
-                    <div className="flex justify-between items-center mb-5">
-                        <div>
-                            <h4 className="font-black text-gray-800 text-lg leading-tight">{vendor.businessName}</h4>
-                            <p className="text-[9px] font-black text-blue-500 uppercase tracking-widest mt-1"><i className="fas fa-location-dot mr-1"></i> {userCoords && vendor.location ? `${calculateDistance(userCoords.lat, userCoords.lng, vendor.location.lat, vendor.location.lng).toFixed(1)} KM Away` : 'Nearby'}</p>
-                        </div>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      {vendor.services?.map((s: any) => (
-                        <div key={s._id} className="border border-gray-50 p-2.5 rounded-3xl bg-gray-50/50 relative shadow-sm">
-                            <button onClick={() => toggleWishlist(s._id)} className="absolute top-4 right-4 z-10"><i className={`fas fa-heart ${wishlist.includes(s._id) ? 'text-red-500' : 'text-gray-200'}`}></i></button>
-                            <img src={s.images?.[0] || 'https://via.placeholder.com/300'} className="h-32 w-full object-cover rounded-2xl mb-3 cursor-pointer" onClick={() => {setDetailTarget(s); setActiveImageIdx(0);}} />
-                            <p className="text-[11px] font-black text-gray-700 truncate mb-1 uppercase tracking-tighter">{s.title}</p>
-                            <p className="text-[#2874f0] font-black text-sm">₹{s.rate}/- <span className="text-[8px] text-gray-400 font-bold uppercase">{s.unitType}</span></p>
-                        </div>
-                      ))}
-                    </div>
+      {isAdminMode ? (
+        <AdminDashboard adminSettings={adminSettings} setAdminSettings={setAdminSettings} updateBookingStatus={updateBookingStatus} token={token} />
+      ) : (
+        <main className="p-4 space-y-6">
+          {view === 'home' && (
+            <>
+              <div className="flex overflow-x-auto gap-3 no-scrollbar pb-2">
+                {BANNERS.map(b => (
+                  <div key={b.id} className={`${b.color} min-w-[300px] h-36 rounded-3xl p-6 text-white relative overflow-hidden shadow-xl`}>
+                    <div className="absolute right-[-20px] top-[-20px] w-32 h-32 bg-white/10 rounded-full blur-2xl"></div>
+                    <p className="text-lg font-black relative z-10 leading-tight">{b.text}</p>
+                    <button className="mt-4 bg-white text-gray-900 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg">Grab Now</button>
                   </div>
                 ))}
               </div>
-            )}
 
-            {view === 'vendor-dashboard' && (
-              <div className="space-y-6 animate-slideIn">
-                  <div className="bg-gradient-to-br from-[#2874f0] to-[#1e5bbd] p-8 rounded-[2.5rem] text-white shadow-xl relative overflow-hidden">
-                      <p className="text-[10px] font-black uppercase tracking-[0.2em] mb-2 opacity-80">Total Business Done</p>
-                      <h2 className="text-4xl font-black italic">₹{bookings.filter(b => b.status === 'completed').reduce((sum, b) => sum + (b.totalAmount || 0), 0)}</h2>
-                      <i className="fas fa-wallet absolute -bottom-4 -right-4 text-white/10 text-9xl"></i>
-                  </div>
-
-                  <div className="bg-white p-6 rounded-[2.5rem] shadow-sm mb-6 border border-green-50">
-                      <div className="flex justify-between items-center mb-4">
-                          <h3 className="font-black uppercase text-[10px] tracking-widest text-gray-400">Settlement Hub</h3>
-                          <i className="fas fa-university text-green-500"></i>
+              <section>
+                <div className="flex justify-between items-center mb-4"><h3 className="font-black text-gray-800 uppercase text-xs tracking-widest">{t.categories}</h3><span className="text-[10px] font-bold text-blue-600 uppercase">View All</span></div>
+                <div className="grid grid-cols-4 gap-4">
+                  {categories.map(cat => (
+                    <button key={cat.id} onClick={() => fetchData(cat.id)} className="flex flex-col items-center gap-2 group">
+                      <div className={`${cat.color} w-16 h-16 rounded-[1.5rem] flex items-center justify-center text-2xl shadow-sm transition-all group-active:scale-90 group-hover:shadow-md border border-white`}>
+                        <i className={`fas ${cat.icon}`}></i>
                       </div>
-                      <div className="space-y-4">
-                          <div className="flex flex-col gap-2">
-                              <p className="text-[9px] font-black text-gray-400 uppercase ml-1">Your Payout UPI ID</p>
-                              <input 
-                                  placeholder="example@upi" 
-                                  className="bg-gray-50 p-4 rounded-xl text-xs font-black border-none shadow-inner"
-                                  value={vendorProfile?.upiId || ''}
-                                  onChange={(e) => setVendorProfile({...vendorProfile, upiId: e.target.value})}
-                              />
+                      <span className="text-[10px] font-black text-gray-600 uppercase text-center line-clamp-1">{cat.name}</span>
+                    </button>
+                  ))}
+                  <button onClick={() => setIsOtherCategory(true)} className="flex flex-col items-center gap-2 group">
+                    <div className="bg-gray-100 w-16 h-16 rounded-[1.5rem] flex items-center justify-center text-2xl border border-white"><i className="fas fa-plus text-gray-400"></i></div>
+                    <span className="text-[10px] font-black text-gray-600 uppercase">Others</span>
+                  </button>
+                </div>
+              </section>
+
+              <section>
+                <div className="flex justify-between items-center mb-4"><h3 className="font-black text-gray-800 uppercase text-xs tracking-widest">{t.popularServices}</h3><div className="flex items-center gap-1 text-[10px] font-black text-green-600 bg-green-50 px-2 py-1 rounded-full"><i className="fas fa-location-arrow"></i> {t.nearby}</div></div>
+                {loading ? (
+                    <div className="space-y-4">{[1,2].map(n => <div key={n} className="bg-white h-48 rounded-[2rem] animate-pulse"></div>)}</div>
+                ) : (
+                  <div className="grid gap-6">
+                    {filteredData.map(vendor => vendor.services?.map((s: any) => (
+                        <div key={s._id} className="bg-white rounded-[2.5rem] overflow-hidden shadow-sm border border-gray-100 group">
+                          <div className="relative h-56">
+                            <img src={s.images?.[0] || 'https://picsum.photos/400/300'} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
+                            <div className="absolute top-4 left-4 bg-white/90 backdrop-blur-md text-[10px] font-black px-3 py-1 rounded-full shadow-lg">₹{s.rate} <span className="text-gray-400 font-bold uppercase">{s.unitType}</span></div>
+                            <button onClick={() => {
+                              const inWish = wishlist.includes(s._id);
+                              const newWish = inWish ? wishlist.filter(id => id !== s._id) : [...wishlist, s._id];
+                              setWishlist(newWish);
+                              localStorage.setItem(`wish_${user?._id || user?.id}`, JSON.stringify(newWish));
+                            }} className="absolute top-4 right-4 w-10 h-10 bg-white rounded-full shadow-lg flex items-center justify-center text-red-500">
+                                <i className={`${wishlist.includes(s._id) ? 'fas' : 'far'} fa-heart`}></i>
+                            </button>
+                            <div className="absolute bottom-4 right-4 bg-blue-600 text-white text-[9px] font-black px-3 py-1 rounded-full uppercase tracking-widest">{s.category}</div>
                           </div>
-                          <button 
-                              onClick={async () => {
-                                  if(!vendorProfile?.upiId || !token) return alert("Please enter UPI ID first");
-                                  setLoading(true);
-                                  try {
-                                    const res = await fetch(`${API_BASE_URL}/vendors/${vendorProfile._id}`, {
-                                        method: 'PATCH',
-                                        headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`},
-                                        body: JSON.stringify({ upiId: vendorProfile.upiId })
-                                    });
-                                    if(res.ok) alert("Withdrawal Request Initiated & Payout UPI Saved!");
-                                  } catch(e) { alert("Update failed"); }
-                                  setLoading(false);
-                              }}
-                              className="w-full bg-green-500 text-white py-4 rounded-xl text-[10px] font-black uppercase shadow-lg shadow-green-100"
-                          >
-                              {loading ? 'Processing...' : 'Withdraw to UPI'}
-                          </button>
-                      </div>
-                  </div>
-
-                  <div className="bg-white p-6 rounded-[2.5rem] shadow-sm">
-                      <div className="flex justify-between items-center mb-6">
-                          <h3 className="font-black uppercase text-xs tracking-widest">Listings</h3>
-                          <button onClick={() => { 
-                              setServiceForm({ title: '', category: 'tent', description: '', rate: '', unitType: 'Per Day', inventoryList: [], images: [], contactNumber: '', _id: '', upiId: '', variant: 'Simple', blockedDates: [] });
-                              setView('my-services'); 
-                          }} className="bg-[#fb641b] text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase">Add New</button>
-                      </div>
-                      <div className="space-y-4">
-                          {myServices.map(s => (
-                              <div key={s._id} className="flex items-center gap-4 p-4 bg-gray-50 rounded-2xl border border-gray-100">
-                                  <img src={s.images[0]} className="w-14 h-14 rounded-xl object-cover" />
-                                  <div className="flex-1">
-                                      <p className="text-[12px] font-black truncate w-32 uppercase tracking-tighter">{s.title}</p>
-                                      <p className="text-[10px] text-[#2874f0] font-bold">₹{s.rate}</p>
-                                  </div>
-                                  <div className="flex gap-2">
-                                      <button onClick={() => { setServiceForm(s); setView('my-services'); }} className="text-blue-500 p-2"><i className="fas fa-edit"></i></button>
-                                      <button onClick={async () => { if(window.confirm("Remove?") && token) await fetch(`${API_BASE_URL}/services/${s._id}`, {method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` }}); fetchMyServices(); }} className="text-red-400 p-2"><i className="fas fa-trash-alt"></i></button>
-                                  </div>
+                          <div className="p-6">
+                            <div className="flex justify-between items-start mb-2">
+                              <div>
+                                <h4 className="font-black text-gray-900 text-lg leading-tight mb-1">{s.title}</h4>
+                                <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest"><i className="fas fa-store mr-1 text-blue-500"></i> {vendor.businessName}</p>
                               </div>
-                          ))}
-                      </div>
+                              <div className="bg-green-50 text-green-600 px-3 py-1 rounded-xl flex items-center gap-1 text-xs font-black">
+                                <i className="fas fa-star"></i> {vendor.rating || 5}
+                              </div>
+                            </div>
+                            <div className="flex gap-2 mt-6">
+                              <button onClick={() => setDetailTarget({...s, vendorName: vendor.businessName, vendorId: vendor._id})} className="flex-1 bg-gray-50 text-gray-900 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest transition-all active:scale-95 border border-gray-100">{t.viewDetails}</button>
+                              <button onClick={() => setBookingTarget({...s, vendorId: vendor._id})} className="flex-[1.5] bg-[#fb641b] text-white py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg shadow-orange-200 transition-all active:scale-95">{t.bookNow}</button>
+                            </div>
+                          </div>
+                        </div>
+                    )))}
                   </div>
-              </div>
-            )}
+                )}
+              </section>
+            </>
+          )}
 
-            {view === 'my-services' && (
-               <div className="bg-white p-6 rounded-[2.5rem] shadow-sm animate-slideIn">
-                  <h3 className="text-sm font-black text-[#2874f0] uppercase mb-8 tracking-widest text-center border-b pb-4">Service Editor</h3>
-                  <form onSubmit={handleAddOrUpdateService} className="space-y-6">
-                     <div className="bg-blue-50/50 p-6 rounded-[2rem] border-2 border-dashed border-blue-200">
-                        <input type="file" multiple className="hidden" ref={fileInputRef} onChange={(e) => {
-                           const files = e.target.files; if(!files) return;
-                           Array.from(files).forEach(f => {
-                             const r = new FileReader();
-                             r.onloadend = () => setServiceForm(p => ({...p, images: [...p.images, r.result as string].slice(0, 5)}));
-                             r.readAsDataURL(f);
-                           });
-                        }} />
-                        <div className="flex flex-wrap gap-2">
-                           {serviceForm.images.map((img, i) => (
-                              <div key={i} className="relative w-14 h-14"><img src={img} className="w-full h-full object-cover rounded-xl" /><button type="button" onClick={() => setServiceForm(p=>({...p, images: p.images.filter((_,idx)=>idx!==i)}))} className="absolute -top-1 -right-1 bg-red-500 text-white w-4 h-4 rounded-full text-[8px]"><i className="fas fa-times"></i></button></div>
-                           ))}
-                           {serviceForm.images.length < 5 && (
-                              <button type="button" onClick={() => fileInputRef.current?.click()} className="w-14 h-14 rounded-xl bg-white border border-blue-200 text-blue-400 flex items-center justify-center"><i className="fas fa-camera"></i></button>
-                           )}
+          {view === 'bookings' && (
+            <div className="space-y-4 animate-slideIn">
+                <div className="bg-white p-6 rounded-[2rem] shadow-sm mb-6"><h3 className="font-black text-lg text-gray-900 leading-tight">Your Orders &<br/>Bookings</h3><p className="text-[10px] text-gray-400 font-black uppercase tracking-widest mt-2">Track your current requests</p></div>
+                {bookings.length === 0 && <div className="text-center py-20"><i className="fas fa-box-open text-4xl text-gray-200 mb-4"></i><p className="text-gray-400 font-black text-xs uppercase">No Bookings Yet</p></div>}
+                {bookings.map(b => (
+                    <div key={b._id} className="bg-white p-6 rounded-[2rem] border border-gray-100 shadow-sm relative overflow-hidden group">
+                        <div className={`absolute top-0 right-0 w-2 h-full ${b.status === 'completed' ? 'bg-green-500' : b.status === 'cancelled' ? 'bg-red-400' : 'bg-blue-400'}`}></div>
+                        <div className="flex justify-between items-start mb-4">
+                            <div className="flex items-center gap-3">
+                                <div className="w-12 h-12 bg-gray-100 rounded-2xl flex items-center justify-center text-gray-400"><i className={`fas ${GLOBAL_CATEGORIES[b.serviceId?.category]?.icon || 'fa-tag'}`}></i></div>
+                                <div>
+                                    <h4 className="font-black text-gray-900 text-sm">{b.serviceId?.title}</h4>
+                                    <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">{b.vendorId?.businessName}</p>
+                                </div>
+                            </div>
+                            <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest ${b.status === 'completed' ? 'bg-green-100 text-green-600' : b.status === 'cancelled' ? 'bg-red-50 text-red-400' : 'bg-blue-50 text-blue-600'}`}>{b.status}</span>
                         </div>
-                     </div>
-                     
-                     <input 
-                        placeholder="Service Title (e.g. Royal Buffet)" 
-                        className="w-full bg-gray-50 p-4 rounded-xl font-bold" 
-                        value={serviceForm.title} 
-                        onChange={e => setServiceForm({...serviceForm, title: e.target.value})} 
-                        required 
-                     />
-                     
-                     <div className="grid grid-cols-2 gap-4">
-                        <select 
-                            className="w-full bg-gray-50 p-4 rounded-xl font-bold text-xs" 
-                            value={isOtherCategory ? 'other' : serviceForm.category} 
-                            onChange={e => {
-                                if(e.target.value === 'other') {
-                                    setIsOtherCategory(true);
-                                    setServiceForm({...serviceForm, category: ''});
-                                } else {
-                                    setIsOtherCategory(false);
-                                    setServiceForm({...serviceForm, category: e.target.value, inventoryList: []});
-                                }
-                            }}
-                        >
-                            {Object.entries(GLOBAL_CATEGORIES).map(([id, cat]) => (
-                                <option key={id} value={id}>{cat.name}</option>
-                            ))}
-                            <option value="other">➕ Other / Add New</option>
-                        </select>
-                        <input placeholder="Rate (₹)" type="number" className="w-full bg-gray-50 p-4 rounded-xl font-bold" value={serviceForm.rate} onChange={e => setServiceForm({...serviceForm, rate: e.target.value})} required />
-                     </div>
-
-                     {isOtherCategory && (
-                        <input 
-                            placeholder="Enter Custom Category Name" 
-                            className="w-full bg-blue-50 p-4 rounded-xl font-black text-xs border border-blue-200 animate-slideIn"
-                            value={serviceForm.category}
-                            onChange={e => setServiceForm({...serviceForm, category: e.target.value})}
-                            required
-                        />
-                     )}
-
-                     <div className="space-y-1">
-                        <p className="text-[9px] font-black text-red-500 uppercase ml-2">Contact Number (Compulsory)*</p>
-                        <input 
-                            placeholder="Vendor Mobile Number" 
-                            className="w-full bg-white p-4 rounded-xl font-bold border-2 border-gray-100 focus:border-blue-500" 
-                            value={serviceForm.contactNumber} 
-                            onChange={e => setServiceForm({...serviceForm, contactNumber: e.target.value})} 
-                            required 
-                        />
-                     </div>
-
-                     <div className="bg-gray-50/50 p-5 rounded-[2rem] border border-gray-100">
-                        <h4 className="text-[10px] font-black uppercase text-gray-400 mb-4 tracking-widest">Included Items</h4>
-                        <div className="grid grid-cols-1 gap-2">
-                            {GLOBAL_CATEGORIES[serviceForm.category]?.items.map(item => {
-                                const isSelected = serviceForm.inventoryList.some(i => i.name === item);
-                                return (
-                                    <div key={item} className="flex items-center gap-3 p-3 bg-white rounded-xl shadow-sm border border-gray-100">
-                                        <input 
-                                            type="checkbox" 
-                                            className="w-4 h-4 rounded accent-blue-600"
-                                            checked={isSelected}
-                                            onChange={(e) => {
-                                                if(e.target.checked) {
-                                                    setServiceForm({...serviceForm, inventoryList: [...serviceForm.inventoryList, {name: item, qty: '1'}]});
-                                                } else {
-                                                    setServiceForm({...serviceForm, inventoryList: serviceForm.inventoryList.filter(i => i.name !== item)});
-                                                }
-                                            }}
-                                        />
-                                        <span className="flex-1 text-[11px] font-bold text-gray-700">{item}</span>
-                                        {isSelected && (
-                                            <input 
-                                                placeholder="Qty" 
-                                                className="w-16 bg-gray-50 p-1 rounded-lg text-[10px] text-center font-black border"
-                                                value={serviceForm.inventoryList.find(i => i.name === item)?.qty || ''}
-                                                onChange={(e) => {
-                                                    setServiceForm({...serviceForm, inventoryList: serviceForm.inventoryList.map(i => i.name === item ? {...i, qty: e.target.value} : i)});
-                                                }}
-                                            />
-                                        )}
-                                    </div>
-                                );
-                            })}
+                        <div className="grid grid-cols-2 gap-4 mb-6">
+                            <div className="bg-gray-50 p-3 rounded-2xl"><p className="text-[8px] font-black text-gray-400 uppercase mb-1">Total Bill</p><p className="text-xs font-black">₹{b.totalAmount}</p></div>
+                            <div className="bg-gray-50 p-3 rounded-2xl"><p className="text-[8px] font-black text-gray-400 uppercase mb-1">OTP Secret</p><p className="text-xs font-black text-blue-600">{b.otp || '****'}</p></div>
                         </div>
-                        
-                        <div className="mt-6 pt-6 border-t border-gray-200">
-                            <p className="text-[9px] font-black text-gray-400 uppercase mb-3">Add Custom Item</p>
+                        <div className="flex gap-2">
+                            {b.status === 'pending' && <button onClick={() => updateBookingStatus(b._id, {status: 'cancelled'})} className="flex-1 py-3 rounded-xl border border-red-100 text-red-500 font-black text-[9px] uppercase tracking-widest">Cancel</button>}
+                            {b.status === 'final_paid' && <button onClick={() => setOtpTarget({id: b._id, code: '', correctCode: b.otp})} className="flex-1 bg-green-600 text-white py-3 rounded-xl font-black text-[9px] uppercase tracking-widest shadow-lg">Release OTP to Vendor</button>}
+                            {b.status === 'completed' && !b.review && <button onClick={() => setReviewTarget(b)} className="flex-1 bg-blue-600 text-white py-3 rounded-xl font-black text-[9px] uppercase tracking-widest">Rate Service</button>}
+                            <button onClick={() => {
+                                const msg = `Hi ${b.vendorId?.businessName}, I am inquiring about my booking for ${b.serviceId?.title}. Booking ID: ${b._id}`;
+                                window.open(`https://wa.me/${adminSettings.adminWhatsApp}?text=${encodeURIComponent(msg)}`);
+                            }} className="flex-1 bg-[#25D366] text-white py-3 rounded-xl font-black text-[9px] uppercase tracking-widest shadow-lg flex items-center justify-center gap-2"><i className="fab fa-whatsapp"></i> Support</button>
+                        </div>
+                    </div>
+                ))}
+            </div>
+          )}
+
+          {view === 'vendor-dashboard' && (
+            <div className="space-y-6 animate-slideIn">
+                <div className="bg-[#2874f0] p-8 rounded-[2.5rem] text-white shadow-xl relative overflow-hidden">
+                    <div className="absolute right-[-30px] bottom-[-30px] w-48 h-48 bg-white/10 rounded-full blur-3xl"></div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-80 mb-2">Vendor Payout Balance</p>
+                    <h2 className="text-4xl font-black">₹{vendorProfile?.totalEarnings || 0}</h2>
+                    <div className="flex items-center gap-2 mt-6 bg-white/20 w-fit px-4 py-2 rounded-2xl backdrop-blur-md">
+                        <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
+                        <span className="text-[10px] font-black uppercase tracking-widest">Store Live & Active</span>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                    <button onClick={() => setView('my-services')} className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-gray-100 flex flex-col items-center gap-3 transition-all active:scale-95 group">
+                        <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center text-xl group-hover:bg-blue-600 group-hover:text-white transition-colors"><i className="fas fa-boxes-stacked"></i></div>
+                        <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">My Inventory</span>
+                    </button>
+                    <button onClick={() => {
+                        const upi = prompt("Enter your Payout UPI ID:", vendorProfile?.upiId);
+                        if(upi) fetch(`${API_BASE_URL}/vendors/${vendorProfile._id}`, {
+                            method: 'PATCH',
+                            headers: {'Content-Type': 'application/json', 'Authorization': `Bearer ${token}`},
+                            body: JSON.stringify({upiId: upi})
+                        }).then(r => r.json()).then(v => setVendorProfile(v));
+                    }} className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-gray-100 flex flex-col items-center gap-3 transition-all active:scale-95 group">
+                        <div className="w-14 h-14 bg-orange-50 text-orange-600 rounded-2xl flex items-center justify-center text-xl group-hover:bg-orange-600 group-hover:text-white transition-colors"><i className="fas fa-wallet"></i></div>
+                        <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Payout Config</span>
+                    </button>
+                </div>
+
+                <div className="space-y-4">
+                    <div className="flex justify-between items-center px-2"><h3 className="font-black text-gray-800 uppercase text-xs tracking-widest">Incoming Requests</h3><span className="bg-blue-600 text-white w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black shadow-lg shadow-blue-200">{bookings.length}</span></div>
+                    {bookings.map(b => (
+                        <div key={b._id} className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-gray-100 relative overflow-hidden group">
+                            <div className="flex justify-between items-start mb-4">
+                                <div>
+                                    <h4 className="font-black text-gray-900 leading-tight">{b.serviceId?.title}</h4>
+                                    <p className="text-[9px] font-black text-blue-500 uppercase tracking-widest mt-1">{b.customerId?.name} • {b.customerId?.mobile}</p>
+                                </div>
+                                <span className={`px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest ${b.status === 'completed' ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>{b.status}</span>
+                            </div>
+                            <div className="bg-gray-50 p-4 rounded-2xl mb-6 space-y-2">
+                                <div className="flex justify-between"><span className="text-[8px] font-black text-gray-400 uppercase">Booked For</span><span className="text-[9px] font-black">{new Date(b.startDate).toLocaleDateString()}</span></div>
+                                <div className="flex justify-between"><span className="text-[8px] font-black text-gray-400 uppercase">Location</span><span className="text-[9px] font-black truncate w-32 text-right">{b.address}</span></div>
+                            </div>
                             <div className="flex gap-2">
-                                <input placeholder="Item Name" className="flex-1 bg-white p-3 rounded-xl text-[10px] font-bold border" value={customItem.name} onChange={e => setCustomItem({...customItem, name: e.target.value})} />
-                                <input placeholder="Qty" className="w-16 bg-white p-3 rounded-xl text-[10px] font-bold border" value={customItem.qty} onChange={e => setCustomItem({...customItem, qty: e.target.value})} />
-                                <button type="button" onClick={() => {
-                                    if(!customItem.name) return;
-                                    setServiceForm({...serviceForm, inventoryList: [...serviceForm.inventoryList, customItem]});
-                                    setCustomItem({name: '', qty: ''});
-                                }} className="bg-blue-600 text-white w-10 h-10 rounded-xl flex items-center justify-center"><i className="fas fa-plus"></i></button>
+                                {b.status === 'pending' && (
+                                    <>
+                                        <button onClick={() => updateBookingStatus(b._id, {status: 'approved'})} className="flex-1 bg-green-600 text-white py-4 rounded-xl font-black text-[9px] uppercase tracking-widest shadow-lg shadow-green-100">Accept</button>
+                                        <button onClick={() => updateBookingStatus(b._id, {status: 'cancelled'})} className="flex-1 bg-white border border-red-100 text-red-500 py-4 rounded-xl font-black text-[9px] uppercase tracking-widest">Decline</button>
+                                    </>
+                                )}
+                                {b.status === 'approved' && <button onClick={() => setBookingTarget(b)} className="flex-1 bg-blue-600 text-white py-4 rounded-xl font-black text-[9px] uppercase tracking-widest shadow-lg">Work Completed</button>}
                             </div>
                         </div>
-                     </div>
+                    ))}
+                </div>
+            </div>
+          )}
 
-                     <textarea placeholder="Description..." className="w-full bg-gray-50 p-5 rounded-xl h-24 text-xs font-bold" value={serviceForm.description} onChange={e => setServiceForm({...serviceForm, description: e.target.value})} />
-                     
-                     <button 
-                        type="submit" 
-                        disabled={loading}
-                        className={`w-full py-5 rounded-2xl font-black uppercase tracking-widest shadow-xl transition-all active:scale-95 ${
-                            loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#fb641b] text-white hover:bg-[#e65a16]'
-                        }`}
-                     >
-                        {loading ? (
-                            <span className="flex items-center justify-center gap-2">
-                                <i className="fas fa-circle-notch animate-spin"></i>
-                                {publishStatus || 'Syncing...'}
-                            </span>
-                        ) : (
-                            serviceForm._id ? 'Update Service' : 'Go Live Now'
-                        )}
-                     </button>
-                  </form>
-               </div>
-            )}
+          {view === 'my-services' && (
+            <div className="space-y-6 animate-slideIn">
+                <div className="bg-white p-8 rounded-[2.5rem] shadow-sm border border-gray-100 text-center relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-24 h-24 bg-blue-50 rounded-bl-[4rem]"></div>
+                    <div className="relative z-10">
+                        <h3 className="text-xl font-black text-gray-900 leading-tight">Publish New<br/>Inventory</h3>
+                        <p className="text-[10px] text-gray-400 font-black uppercase tracking-widest mt-2">Add tents, DJ equipment or more</p>
+                        <button onClick={() => {
+                            setServiceForm({title:'', category:'tent', description:'', rate:'', unitType:'Per Day', inventoryList:[], images:[], contactNumber: user?.mobile || '', _id:'', upiId:'', variant:'Simple', blockedDates:[]});
+                            setPublishStatus('editing');
+                        }} className="mt-6 bg-[#2874f0] text-white px-8 py-4 rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-blue-200 active:scale-95 transition-all">Add New Item</button>
+                    </div>
+                </div>
 
-            {view === 'bookings' && (
-               <div className="space-y-6">
-                   <h2 className="text-xl font-black text-gray-800 border-l-8 border-[#fb641b] pl-4 mb-6 uppercase tracking-tighter">My Orders</h2>
-                   {bookings.map(b => (
-                      <div key={b._id} className="bg-white p-6 rounded-[2.5rem] shadow-sm mb-6 border border-gray-100">
-                          <div className="flex justify-between items-start mb-6">
-                              <div>
-                                  <p className="text-[9px] font-black text-[#2874f0] uppercase tracking-widest mb-1">{b.serviceId?.title}</p>
-                                  <h4 className="font-black text-gray-800">{user.role === 'vendor' ? b.customerId?.name : b.vendorId?.businessName}</h4>
+                <div className="grid gap-4">
+                    {myServices.map(s => (
+                        <div key={s._id} className="bg-white p-5 rounded-[2.5rem] shadow-sm border border-gray-100 flex gap-4 items-center group">
+                            <img src={s.images?.[0] || 'https://picsum.photos/100'} className="w-20 h-20 rounded-2xl object-cover shadow-sm group-hover:scale-110 transition-transform" />
+                            <div className="flex-1">
+                                <h4 className="font-black text-gray-900 text-sm">{s.title}</h4>
+                                <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest mb-2">{s.category} • {s.variant}</p>
+                                <div className="flex justify-between items-center">
+                                    <span className="text-blue-600 font-black text-xs">₹{s.rate}</span>
+                                    <div className="flex gap-2">
+                                        <button onClick={() => {setServiceForm(s); setPublishStatus('editing');}} className="w-8 h-8 bg-gray-50 rounded-xl flex items-center justify-center text-gray-500 hover:bg-blue-600 hover:text-white transition-all"><i className="fas fa-edit text-[10px]"></i></button>
+                                        <button onClick={async () => {
+                                            if(window.confirm("Remove this item?")) {
+                                                await fetch(`${API_BASE_URL}/services/${s._id}`, {method:'DELETE', headers:{'Authorization':`Bearer ${token}`}});
+                                                fetchMyServices();
+                                            }
+                                        }} className="w-8 h-8 bg-gray-50 rounded-xl flex items-center justify-center text-red-400 hover:bg-red-500 hover:text-white transition-all"><i className="fas fa-trash-alt text-[10px]"></i></button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </div>
+          )}
+
+          {view === 'wishlist' && (
+              <div className="space-y-4 animate-slideIn">
+                  <div className="bg-white p-8 rounded-[2.5rem] shadow-sm text-center">
+                    <h3 className="text-xl font-black text-gray-900 leading-tight">My Wishlist</h3>
+                    <p className="text-[10px] text-gray-400 font-black uppercase tracking-widest mt-2">Saved items for later</p>
+                  </div>
+                  {wishlist.length === 0 && <div className="text-center py-20 text-gray-300"><i className="far fa-heart text-4xl mb-4 opacity-20"></i><p className="text-[10px] font-black uppercase tracking-widest">Wishlist is Empty</p></div>}
+                  {data.filter(v => v.services?.some((s:any) => wishlist.includes(s._id))).map(vendor => vendor.services?.filter((s:any) => wishlist.includes(s._id)).map((s:any) => (
+                      <div key={s._id} className="bg-white p-5 rounded-[2.5rem] shadow-sm border border-gray-100 flex gap-4 items-center group">
+                          <img src={s.images?.[0] || 'https://picsum.photos/100'} className="w-20 h-20 rounded-2xl object-cover" />
+                          <div className="flex-1">
+                              <h4 className="font-black text-gray-900 text-sm">{s.title}</h4>
+                              <p className="text-[9px] font-black text-gray-400 uppercase tracking-widest">{vendor.businessName}</p>
+                              <div className="flex justify-between items-center mt-2">
+                                  <span className="text-blue-600 font-black text-xs">₹{s.rate}</span>
+                                  <button onClick={() => setBookingTarget({...s, vendorId: vendor._id})} className="bg-[#fb641b] text-white px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest shadow-lg active:scale-95 transition-all">Book Now</button>
                               </div>
-                              <span className={`text-[8px] font-black uppercase px-3 py-1 rounded-full ${b.status === 'completed' ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>{b.status.replace('_',' ')}</span>
-                          </div>
-                          <Stepper status={b.status} />
-                          <div className="mt-4 space-y-2">
-                              {user.role === UserRole.USER && (
-                                  <div className="p-4 bg-blue-50/50 rounded-2xl border border-blue-100 mb-4">
-                                      {b.status === 'approved' && (
-                                        <>
-                                            <p className="text-[9px] font-black text-blue-800 uppercase mb-2 tracking-widest">Phase 1: Advance (10% to Vendor)</p>
-                                            <p className="text-xs font-bold mb-3">Pay UPI: <span className="text-blue-600">{b.vendorId?.upiId || 'Vendor UPI'}</span></p>
-                                            <button onClick={() => proofInputRef.current?.click()} className="w-full bg-blue-600 text-white py-3 rounded-xl text-[10px] font-black uppercase shadow-sm">Upload Screenshot</button>
-                                        </>
-                                      )}
-                                      {b.status === 'advance_paid' && (
-                                        <>
-                                            <p className="text-[9px] font-black text-orange-800 uppercase mb-2 tracking-widest">Phase 2: Final (90% to Admin)</p>
-                                            <p className="text-xs font-bold mb-3">Pay UPI: <span className="text-orange-600">{adminSettings?.adminUPI || 'admin@okaxis'}</span></p>
-                                            <button onClick={() => finalProofInputRef.current?.click()} className="w-full bg-orange-500 text-white py-3 rounded-xl text-[10px] font-black uppercase shadow-sm">Upload Final Bill Proof</button>
-                                        </>
-                                      )}
-                                      {b.status === 'final_paid' && b.otp && (
-                                          <div className="bg-green-50 p-6 rounded-3xl text-center border-2 border-dashed border-green-200 animate-bounce">
-                                              <p className="text-[10px] font-black text-green-700 uppercase mb-2">Payment Approved! Share OTP with Vendor</p>
-                                              <h3 className="text-4xl font-black text-green-600 tracking-[0.8rem] ml-3">{b.otp}</h3>
-                                          </div>
-                                      )}
-                                  </div>
-                              )}
-                              {user.role === UserRole.VENDOR && (
-                                  <>
-                                    {b.status === 'pending' && <button onClick={() => updateBookingStatus(b._id, {status: 'approved'})} className="w-full bg-green-500 text-white py-4 rounded-xl text-[10px] font-black uppercase">Accept Order</button>}
-                                    {b.status === 'awaiting_advance_verification' && (
-                                        <div className="space-y-2">
-                                            <button onClick={() => setScreenshotPreview(b.advanceProof)} className="w-full bg-blue-50 text-blue-600 py-3 rounded-xl text-[10px] font-black uppercase border border-blue-200">View Screenshot</button>
-                                            <button onClick={() => handleVendorVerification(b._id, 'advance_paid')} className="w-full bg-green-500 text-white py-3 rounded-xl text-[10px] font-black uppercase shadow-md">Verify Advance Payment</button>
-                                        </div>
-                                    )}
-                                    {b.status === 'final_paid' && (
-                                        <button onClick={() => setOtpTarget({ id: b._id, code: '', correctCode: b.otp })} className="w-full bg-green-600 text-white py-4 rounded-xl text-[10px] font-black uppercase shadow-lg">Verify Completion OTP</button>
-                                    )}
-                                  </>
-                              )}
                           </div>
                       </div>
-                   ))}
-               </div>
-            )}
-          </>
-        )}
-      </main>
+                  )))}
+              </div>
+          )}
+        </main>
+      )}
 
-      {bookingTarget && (
-        <div className="fixed inset-0 bg-black/60 z-[400] flex items-center justify-center p-6 backdrop-blur-sm overflow-y-auto">
-           <div className="bg-white w-full rounded-[2.5rem] p-10 animate-slideUp shadow-2xl">
-              <h2 className="text-xl font-black uppercase mb-8">Booking Details</h2>
-              <form onSubmit={handleBooking} className="space-y-6">
-                 <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1"><p className="text-[8px] font-black text-gray-400 uppercase">Start</p><input type="date" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-black" required onChange={e => setBookingForm({...bookingForm, startDate: e.target.value})} /></div>
-                    <div className="space-y-1"><p className="text-[8px] font-black text-gray-400 uppercase">End</p><input type="date" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-black" required onChange={e => setBookingForm({...bookingForm, endDate: e.target.value})} /></div>
-                 </div>
-                 <textarea placeholder="Detailed Event Address..." className="w-full bg-gray-50 p-5 rounded-xl text-xs font-black h-24" required onChange={e => setBookingForm({...bookingForm, address: e.target.value})} />
-                 {(() => {
-                    const start = new Date(bookingForm.startDate);
-                    const end = new Date(bookingForm.endDate);
-                    const isConflict = bookingTarget.blockedDates?.some((d: string) => {
-                        const blocked = new Date(d);
-                        return blocked >= start && blocked <= end;
-                    });
-                    return (
-                        <div className="space-y-3">
-                            {isConflict && <p className="text-center text-[10px] font-black text-red-500 uppercase animate-pulse">⚠️ Service not available for selected dates.</p>}
-                            <button type="submit" disabled={isConflict} className={`w-full py-6 rounded-2xl font-black uppercase text-xs shadow-2xl tracking-widest transition-all ${isConflict ? 'bg-gray-300 grayscale cursor-not-allowed' : 'bg-[#fb641b] text-white hover:scale-105'}`}>
-                                {isConflict ? 'Already Booked' : 'Confirm Booking'}
-                            </button>
+      <nav className="fixed bottom-0 left-0 right-0 bg-white/80 backdrop-blur-2xl border-t border-gray-100 p-4 flex justify-around items-center z-[200] max-w-md mx-auto rounded-t-[2.5rem] shadow-2xl">
+        {[
+          { id: 'home', icon: 'fa-home', label: 'Explore' },
+          { id: 'bookings', icon: 'fa-calendar-check', label: 'Bookings' },
+          { id: 'wishlist', icon: 'fa-heart', label: 'Saved' },
+          { id: user?.role === 'vendor' ? 'vendor-dashboard' : 'home', icon: user?.role === 'vendor' ? 'fa-store' : 'fa-user', label: user?.role === 'vendor' ? 'Dashboard' : 'Account' }
+        ].map(item => (
+          <button 
+            key={item.id} 
+            onClick={() => setView(item.id as any)} 
+            className={`flex flex-col items-center gap-1 transition-all ${view === item.id ? 'text-[#2874f0]' : 'text-gray-400'}`}
+          >
+            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all ${view === item.id ? 'bg-blue-50 shadow-inner' : ''}`}>
+              <i className={`fas ${item.icon} text-lg`}></i>
+            </div>
+            <span className="text-[8px] font-black uppercase tracking-widest">{item.label}</span>
+          </button>
+        ))}
+      </nav>
+
+      {/* MODALS SECTION */}
+      {publishStatus === 'editing' && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xl z-[500] flex items-end justify-center p-4">
+            <div className="bg-white w-full max-w-sm rounded-[3rem] p-8 animate-slideUp max-h-[90vh] overflow-y-auto no-scrollbar shadow-2xl">
+                <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-xl font-black text-gray-900 leading-tight">Inventory<br/>Details</h3>
+                    <button onClick={() => setPublishStatus('')} className="bg-gray-100 w-10 h-10 rounded-full flex items-center justify-center text-gray-400"><i className="fas fa-times"></i></button>
+                </div>
+                <div className="space-y-5">
+                    <div className="space-y-2">
+                        <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Service Title</label>
+                        <input className="w-full bg-gray-50 p-5 rounded-[1.5rem] font-bold text-sm outline-none border border-transparent focus:border-blue-100" placeholder="e.g. Premium Wedding Pandal" value={serviceForm.title} onChange={e => setServiceForm({...serviceForm, title: e.target.value})} />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Category</label>
+                            <select className="w-full bg-gray-50 p-5 rounded-[1.5rem] font-bold text-sm outline-none border border-transparent focus:border-blue-100 appearance-none" value={serviceForm.category} onChange={e => setServiceForm({...serviceForm, category: e.target.value})}>
+                                {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                            </select>
                         </div>
-                    );
-                 })()}
-              </form>
-              <button onClick={() => setBookingTarget(null)} className="w-full text-gray-400 mt-4 text-[10px] font-black uppercase">Close</button>
-           </div>
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Quality Level</label>
+                            <select className="w-full bg-gray-50 p-5 rounded-[1.5rem] font-bold text-sm outline-none border border-transparent focus:border-blue-100 appearance-none" value={serviceForm.variant} onChange={e => setServiceForm({...serviceForm, variant: e.target.value as any})}>
+                                <option value="Simple">Basic</option>
+                                <option value="Standard">Standard</option>
+                                <option value="Premium">Premium</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Rate (₹)</label>
+                            <input type="number" className="w-full bg-gray-50 p-5 rounded-[1.5rem] font-bold text-sm outline-none" placeholder="0.00" value={serviceForm.rate} onChange={e => setServiceForm({...serviceForm, rate: e.target.value})} />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Unit</label>
+                            <select className="w-full bg-gray-50 p-5 rounded-[1.5rem] font-bold text-sm outline-none" value={serviceForm.unitType} onChange={e => setServiceForm({...serviceForm, unitType: e.target.value})}>
+                                <option>Per Day</option>
+                                <option>Per Function</option>
+                                <option>Per Item</option>
+                                <option>Package</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div className="space-y-3">
+                        <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Inventory Checklist</label>
+                        <div className="flex gap-2">
+                            <input className="flex-1 bg-gray-50 p-4 rounded-xl text-xs font-bold outline-none" placeholder="Item Name" value={customItem.name} onChange={e => setCustomItem({...customItem, name: e.target.value})} />
+                            <input className="w-20 bg-gray-50 p-4 rounded-xl text-xs font-bold outline-none" placeholder="Qty" value={customItem.qty} onChange={e => setCustomItem({...customItem, qty: e.target.value})} />
+                            <button onClick={() => { if(customItem.name) { setServiceForm({...serviceForm, inventoryList: [...serviceForm.inventoryList, customItem]}); setCustomItem({name:'', qty:''}); } }} className="bg-blue-600 text-white w-12 rounded-xl flex items-center justify-center shadow-lg"><i className="fas fa-plus"></i></button>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                            {serviceForm.inventoryList.map((item, idx) => (
+                                <div key={idx} className="bg-blue-50 text-blue-600 px-3 py-2 rounded-xl text-[9px] font-black uppercase flex items-center gap-2">
+                                    {item.name} ({item.qty}) <i className="fas fa-times-circle cursor-pointer" onClick={() => setServiceForm({...serviceForm, inventoryList: serviceForm.inventoryList.filter((_,i) => i !== idx)})}></i>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="space-y-3">
+                        <label className="text-[10px] font-black text-gray-400 uppercase ml-1">Service Photos</label>
+                        <div className="flex gap-3 overflow-x-auto no-scrollbar pb-2">
+                            <button onClick={() => fileInputRef.current?.click()} className="min-w-[80px] h-20 bg-gray-50 border-2 border-dashed border-gray-200 rounded-2xl flex items-center justify-center text-gray-300 hover:text-blue-500 hover:border-blue-300 transition-colors"><i className="fas fa-camera text-xl"></i></button>
+                            {serviceForm.images.map((img, idx) => (
+                                <div key={idx} className="relative min-w-[80px] h-20">
+                                    <img src={img} className="w-full h-full object-cover rounded-2xl shadow-sm" />
+                                    <button onClick={() => setServiceForm({...serviceForm, images: serviceForm.images.filter((_,i) => i !== idx)})} className="absolute -top-1 -right-1 bg-red-500 text-white w-5 h-5 rounded-full flex items-center justify-center text-[8px]"><i className="fas fa-times"></i></button>
+                                </div>
+                            ))}
+                        </div>
+                        <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={e => handleFileChange(e, true)} />
+                    </div>
+
+                    <button disabled={loading} onClick={async () => {
+                        setLoading(true);
+                        const endpoint = serviceForm._id ? `${API_BASE_URL}/services/${serviceForm._id}` : `${API_BASE_URL}/services`;
+                        const method = serviceForm._id ? 'PUT' : 'POST';
+                        try {
+                            const res = await fetch(endpoint, {
+                                method,
+                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                                body: JSON.stringify({...serviceForm, vendorId: vendorProfile._id})
+                            });
+                            if (res.ok) {
+                                alert("Inventory Updated Successfully!");
+                                setPublishStatus('');
+                                fetchMyServices();
+                            }
+                        } catch (e) {} finally { setLoading(false); }
+                    }} className="w-full bg-[#fb641b] text-white py-5 rounded-[1.5rem] font-black text-xs uppercase tracking-widest shadow-xl shadow-orange-100 active:scale-95 transition-all">
+                        {loading ? 'Publishing...' : 'Confirm & Publish'}
+                    </button>
+                </div>
+            </div>
         </div>
       )}
 
       {detailTarget && (
-          <div className="fixed inset-0 bg-black/95 z-[500] overflow-y-auto">
-              <div className="max-w-md mx-auto min-h-screen bg-white relative pb-32">
-                  <button onClick={() => setDetailTarget(null)} className="absolute top-6 left-6 z-[510] text-white w-10 h-10 bg-black/30 rounded-full"><i className="fas fa-arrow-left"></i></button>
-                  <img src={detailTarget.images[activeImageIdx]} className="h-[40vh] w-full object-cover" />
-                  <div className="p-8 space-y-6">
-                      <h1 className="text-2xl font-black text-gray-800 uppercase tracking-tighter">{detailTarget.title}</h1>
-                      <p className="text-3xl font-black text-gray-900 italic">₹{detailTarget.rate}/-</p>
-                      
-                      {detailTarget.inventoryList && detailTarget.inventoryList.length > 0 && (
-                          <div className="bg-blue-50/50 p-6 rounded-[2rem] border border-blue-100">
-                              <h4 className="text-[10px] font-black uppercase text-blue-600 mb-4 tracking-widest flex items-center gap-2"><i className="fas fa-list-check"></i> What's Included / Inventory</h4>
-                              <div className="space-y-3">
-                                  {detailTarget.inventoryList.map((item: any, idx: number) => (
-                                      <div key={idx} className="flex justify-between items-center pb-2 border-b border-blue-100/50 last:border-0">
-                                          <span className="text-[11px] font-bold text-gray-700">{item.name}</span>
-                                          <span className="bg-white px-2 py-0.5 rounded text-[10px] font-black text-blue-600 shadow-sm">x{item.qty}</span>
-                                      </div>
-                                  ))}
-                              </div>
-                          </div>
-                      )}
+        <div className="fixed inset-0 bg-white z-[600] overflow-y-auto no-scrollbar animate-slideIn">
+            <div className="relative h-[45vh]">
+                <img src={detailTarget.images?.[activeImageIdx] || 'https://picsum.photos/600/400'} className="w-full h-full object-cover" />
+                <button onClick={() => setDetailTarget(null)} className="absolute top-6 left-6 w-12 h-12 bg-white/20 backdrop-blur-md rounded-2xl flex items-center justify-center text-white shadow-xl"><i className="fas fa-arrow-left"></i></button>
+                <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-2">
+                    {detailTarget.images?.map((_:any, i:number) => (
+                        <div key={i} onClick={() => setActiveImageIdx(i)} className={`h-1.5 rounded-full transition-all cursor-pointer ${activeImageIdx === i ? 'w-8 bg-blue-600' : 'w-2 bg-white/50'}`}></div>
+                    ))}
+                </div>
+            </div>
+            <div className="p-8 space-y-8 pb-32 -mt-10 bg-white rounded-t-[3rem] relative z-10 shadow-2xl">
+                <div className="flex justify-between items-start">
+                    <div>
+                        <span className="text-[10px] font-black text-blue-600 uppercase tracking-widest bg-blue-50 px-3 py-1 rounded-full mb-3 inline-block">{detailTarget.category}</span>
+                        <h2 className="text-3xl font-black text-gray-900 leading-tight mb-2">{detailTarget.title}</h2>
+                        <p className="text-[11px] font-black text-gray-400 uppercase tracking-widest flex items-center gap-2"><i className="fas fa-store text-blue-500"></i> {detailTarget.vendorName}</p>
+                    </div>
+                    <div className="text-right">
+                        <p className="text-2xl font-black text-blue-600">₹{detailTarget.rate}</p>
+                        <p className="text-[10px] font-black text-gray-400 uppercase">{detailTarget.unitType}</p>
+                    </div>
+                </div>
 
-                      {detailTarget.blockedDates && detailTarget.blockedDates.length > 0 && (
-                          <div className="bg-red-50 p-4 rounded-2xl border border-red-100">
-                              <h4 className="text-[10px] font-black uppercase text-red-600 mb-2 tracking-widest">Booked Dates</h4>
-                              <div className="flex flex-wrap gap-2">
-                                  {detailTarget.blockedDates.map((d: string) => <span key={d} className="text-[9px] font-bold text-red-500 bg-white px-2 py-1 rounded-lg shadow-sm border border-red-50">Already Booked on {d}</span>)}
-                              </div>
-                          </div>
-                      )}
+                <div className="bg-gray-50 p-6 rounded-[2rem] space-y-4">
+                    <h4 className="text-[11px] font-black text-gray-900 uppercase tracking-widest flex items-center gap-2"><i className="fas fa-list-check text-blue-600"></i> What's Included?</h4>
+                    <div className="grid grid-cols-2 gap-3">
+                        {detailTarget.inventoryList?.length > 0 ? detailTarget.inventoryList.map((item:any, idx:number) => (
+                            <div key={idx} className="bg-white p-3 rounded-xl flex items-center gap-3 shadow-sm">
+                                <i className="fas fa-check-circle text-green-500 text-xs"></i>
+                                <div className="flex flex-col">
+                                    <span className="text-[10px] font-black text-gray-700 uppercase leading-none">{item.name}</span>
+                                    <span className="text-[8px] font-bold text-gray-400 mt-1">{item.qty} units</span>
+                                </div>
+                            </div>
+                        )) : (GLOBAL_CATEGORIES[detailTarget.category]?.items?.map((item:string, idx:number) => (
+                            <div key={idx} className="bg-white p-3 rounded-xl flex items-center gap-3 shadow-sm">
+                                <i className="fas fa-check-circle text-green-500 text-xs"></i>
+                                <span className="text-[10px] font-black text-gray-700 uppercase">{item}</span>
+                            </div>
+                        )))}
+                    </div>
+                </div>
 
-                      <div className="bg-gray-50 p-6 rounded-[2rem]"><p className="text-xs font-bold text-gray-600 leading-relaxed">{detailTarget.description}</p></div>
+                <div className="space-y-4">
+                    <h4 className="text-[11px] font-black text-gray-900 uppercase tracking-widest">Service Description</h4>
+                    <p className="text-gray-500 text-sm leading-relaxed font-medium">{detailTarget.description || "This high-quality service is provided by our verified vendor with years of experience in rural event management. We guarantee timely setup and clean equipment for your auspicious occasions."}</p>
+                </div>
+
+                <div className="fixed bottom-0 left-0 right-0 p-6 bg-white/80 backdrop-blur-xl border-t border-gray-100 max-w-md mx-auto z-[700]">
+                    <button onClick={() => { setBookingTarget(detailTarget); setDetailTarget(null); }} className="w-full bg-[#fb641b] text-white py-5 rounded-[1.5rem] font-black text-xs uppercase tracking-widest shadow-2xl shadow-orange-200 active:scale-95 transition-all">Instant Book Now</button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {bookingTarget && !bookingTarget.status && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xl z-[800] flex items-end justify-center p-4">
+            <div className="bg-white w-full max-w-sm rounded-[3rem] p-8 animate-slideUp max-h-[90vh] overflow-y-auto no-scrollbar shadow-2xl">
+                <div className="flex justify-between items-center mb-8">
+                    <div>
+                        <h3 className="text-xl font-black text-gray-900 leading-tight">Review Your<br/>Booking</h3>
+                        <p className="text-[10px] text-gray-400 font-black uppercase mt-1">Check dates & venue</p>
+                    </div>
+                    <button onClick={() => setBookingTarget(null)} className="bg-gray-100 w-12 h-12 rounded-full flex items-center justify-center text-gray-400"><i className="fas fa-times"></i></button>
+                </div>
+                <div className="space-y-6">
+                    <div className="bg-blue-50 p-6 rounded-[2rem] border border-blue-100">
+                        <div className="flex justify-between mb-4 pb-4 border-b border-blue-100">
+                            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Service Price</span>
+                            <span className="text-lg font-black text-blue-600">₹{bookingTarget.rate}</span>
+                        </div>
+                        <div className="flex justify-between items-center">
+                            <span className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Platform Fee</span>
+                            <span className="text-[11px] font-black text-green-600">₹0.00 (FREE)</span>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                            <label className="text-[9px] font-black text-gray-400 uppercase ml-1">Event Date</label>
+                            <input type="date" className="w-full bg-gray-50 p-4 rounded-xl font-bold text-xs outline-none" value={bookingForm.startDate} onChange={e => setBookingForm({...bookingForm, startDate: e.target.value, endDate: e.target.value})} />
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-[9px] font-black text-gray-400 uppercase ml-1">Pin Code</label>
+                            <input type="number" className="w-full bg-gray-50 p-4 rounded-xl font-bold text-xs outline-none" placeholder="400001" value={bookingForm.pincode} onChange={e => setBookingForm({...bookingForm, pincode: e.target.value})} />
+                        </div>
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-[9px] font-black text-gray-400 uppercase ml-1">Full Venue Address</label>
+                        <textarea className="w-full bg-gray-50 p-4 rounded-2xl font-bold text-xs outline-none min-h-[80px]" placeholder="Village, Landmark, Street details..." value={bookingForm.address} onChange={e => setBookingForm({...bookingForm, address: e.target.value})} />
+                    </div>
+
+                    <div className="space-y-2">
+                        <label className="text-[9px] font-black text-gray-400 uppercase ml-1">Alt. Contact Number</label>
+                        <input className="w-full bg-gray-50 p-4 rounded-xl font-bold text-xs outline-none" placeholder="9876XXXXXX" value={bookingForm.altMobile} onChange={e => setBookingForm({...bookingForm, altMobile: e.target.value})} />
+                    </div>
+
+                    <div className="bg-yellow-50 p-4 rounded-2xl border border-yellow-100">
+                        <p className="text-[9px] font-black text-yellow-700 leading-relaxed"><i className="fas fa-info-circle mr-1"></i> Note: Payments are processed via cash/UPI directly at the time of service delivery. No advance needed on platform.</p>
+                    </div>
+
+                    <button onClick={submitBooking} className="w-full bg-[#fb641b] text-white py-5 rounded-[1.5rem] font-black text-xs uppercase tracking-widest shadow-xl shadow-orange-100">Confirm Booking Request</button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {bookingTarget && bookingTarget.status === 'approved' && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-xl z-[900] flex items-end justify-center p-4">
+            <div className="bg-white w-full max-w-sm rounded-[3rem] p-8 animate-slideUp">
+                <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-xl font-black text-gray-900 leading-tight">Job Complete<br/>Verification</h3>
+                    <button onClick={() => setBookingTarget(null)} className="text-gray-400"><i className="fas fa-times"></i></button>
+                </div>
+                <div className="space-y-6">
+                    <p className="text-[11px] font-bold text-gray-400 leading-relaxed uppercase tracking-widest">Upload photo of the setup or work done to initiate final payment request from customer.</p>
+                    <div className="h-48 bg-gray-50 rounded-[2rem] border-2 border-dashed border-gray-200 flex flex-col items-center justify-center gap-3 relative overflow-hidden group">
+                        {bookingTarget.finalProof ? (
+                            <img src={bookingTarget.finalProof} className="w-full h-full object-cover" />
+                        ) : (
+                            <>
+                                <i className="fas fa-camera text-3xl text-gray-200 group-hover:text-blue-400 transition-colors"></i>
+                                <span className="text-[9px] font-black text-gray-400 uppercase tracking-widest">Click to Capture Setup</span>
+                            </>
+                        )}
+                        <input type="file" className="absolute inset-0 opacity-0 cursor-pointer" onChange={e => handleFileChange(e, false, false, true)} />
+                    </div>
+                    <button onClick={() => updateBookingStatus(bookingTarget._id, {status: 'awaiting_final_verification', finalProof: bookingTarget.finalProof})} className="w-full bg-blue-600 text-white py-5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-blue-100">Submit for Verification</button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {otpTarget && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-2xl z-[1000] flex items-center justify-center p-8">
+            <div className="bg-white w-full max-w-xs rounded-[2.5rem] p-8 text-center animate-slideUp">
+                <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center text-2xl mx-auto mb-6"><i className="fas fa-shield-halved"></i></div>
+                <h3 className="text-xl font-black text-gray-900 mb-2">Release OTP</h3>
+                <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-6">Enter OTP provided by customer to complete this order</p>
+                <div className="flex justify-center gap-2 mb-8">
+                    {[0,1,2,3].map(i => (
+                        <input key={i} maxLength={1} value={otpTarget.code[i] || ''} onChange={e => {
+                            const newCode = otpTarget.code.split('');
+                            newCode[i] = e.target.value;
+                            setOtpTarget({...otpTarget, code: newCode.join('')});
+                        }} className="w-12 h-16 bg-gray-50 rounded-xl text-center font-black text-xl border-2 border-transparent focus:border-blue-400 outline-none" />
+                    ))}
+                </div>
+                <div className="flex gap-2">
+                    <button onClick={() => setOtpTarget(null)} className="flex-1 py-4 text-gray-400 font-black text-[10px] uppercase">Cancel</button>
+                    <button onClick={() => {
+                        if(otpTarget.code === otpTarget.correctCode) {
+                            updateBookingStatus(otpTarget.id, {status: 'completed'});
+                            setOtpTarget(null);
+                            alert("Booking Completed Successfully!");
+                        } else alert("Invalid OTP Secret");
+                    }} className="flex-1 bg-green-600 text-white py-4 rounded-xl font-black text-[10px] uppercase shadow-lg">Verify</button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {reviewTarget && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-xl z-[1000] flex items-end justify-center p-4">
+              <div className="bg-white w-full max-w-sm rounded-[3rem] p-8 animate-slideUp shadow-2xl">
+                  <div className="flex justify-between items-center mb-6">
+                      <h3 className="text-xl font-black text-gray-900 leading-tight">Rate the<br/>Experience</h3>
+                      <button onClick={() => setReviewTarget(null)} className="text-gray-400"><i className="fas fa-times"></i></button>
                   </div>
-                  <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto p-4 bg-white border-t border-gray-100 flex gap-4 z-[520]">
-                      <button onClick={() => toggleWishlist(detailTarget._id)} className="flex-1 py-5 border-2 border-gray-100 rounded-2xl text-[10px] font-black uppercase">{wishlist.includes(detailTarget._id) ? 'Saved' : 'Wishlist'}</button>
-                      <button onClick={() => { setBookingTarget(detailTarget); setDetailTarget(null); }} className="flex-2 bg-[#fb641b] text-white py-5 rounded-2xl text-[10px] font-black uppercase shadow-xl">Book Now</button>
+                  <div className="space-y-6">
+                      <div className="flex justify-center gap-4">
+                          {[1,2,3,4,5].map(star => (
+                              <i key={star} onClick={() => setReviewForm({...reviewForm, rating: star})} className={`fas fa-star text-3xl cursor-pointer transition-all ${reviewForm.rating >= star ? 'text-yellow-400 scale-110' : 'text-gray-200'}`}></i>
+                          ))}
+                      </div>
+                      <textarea className="w-full bg-gray-50 p-5 rounded-3xl text-sm font-bold outline-none border border-transparent focus:border-blue-100 min-h-[120px]" placeholder="How was the setup quality, behavior, and timing?" onChange={e => setReviewForm({...reviewForm, comment: e.target.value})} />
+                      <button onClick={async () => {
+                          await updateBookingStatus(reviewTarget._id, {review: reviewForm});
+                          setReviewTarget(null);
+                          alert("Thank you for your feedback!");
+                      }} className="w-full bg-[#2874f0] text-white py-5 rounded-[1.5rem] font-black text-[10px] uppercase tracking-[0.2em] shadow-xl shadow-blue-100 active:scale-95 transition-all">Submit Review</button>
                   </div>
               </div>
           </div>
       )}
 
-      <a 
-        href={`https://wa.me/${adminSettings?.adminWhatsApp || '910000000000'}?text=Hello GramCart Support, I need help with my booking.`} 
-        target="_blank" 
-        rel="noreferrer"
-        className="fixed bottom-28 right-6 w-14 h-14 bg-[#25D366] text-white rounded-full flex items-center justify-center shadow-2xl z-[400] animate-bounce"
-      >
-        <i className="fab fa-whatsapp text-3xl"></i>
-      </a>
-
-      <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white h-24 flex items-center justify-around shadow-[0_-20px_60px_-15px_rgba(0,0,0,0.1)] z-[300] rounded-t-[3.5rem] px-8 border-t border-gray-100">
-        <button onClick={() => setView('home')} className={`flex flex-col items-center gap-2 ${view === 'home' ? 'text-[#2874f0]' : 'text-gray-300'}`}><i className="fas fa-home text-xl"></i><span className="text-[8px] font-black uppercase">Home</span></button>
-        <button onClick={() => setView('bookings')} className={`flex flex-col items-center gap-2 ${view === 'bookings' ? 'text-[#2874f0]' : 'text-gray-300'}`}><i className="fas fa-shopping-bag text-xl"></i><span className="text-[8px] font-black uppercase">Orders</span></button>
-        {user.role === UserRole.VENDOR && (
-          <button onClick={() => setView('vendor-dashboard')} className={`flex flex-col items-center gap-2 ${view === 'vendor-dashboard' ? 'text-[#2874f0]' : 'text-gray-300'}`}><i className="fas fa-chart-line text-xl"></i><span className="text-[8px] font-black uppercase">Hub</span></button>
-        )}
-        <button onClick={handleLogout} className="text-red-300 flex flex-col items-center gap-2"><i className="fas fa-power-off text-xl"></i><span className="text-[8px] font-black uppercase">Logout</span></button>
-      </nav>
-
-      <input type="file" className="hidden" ref={proofInputRef} onChange={(e) => handleProofUpload(e, bookings.find(b=>b.status==='approved')?._id, 'advanceProof')} />
-      <input type="file" className="hidden" ref={finalProofInputRef} onChange={(e) => handleProofUpload(e, bookings.find(b=>b.status==='advance_paid')?._id, 'finalProof')} />
-
-      <style>{`
-        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-        .animate-slideUp { animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1); }
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .animate-slideIn { animation: slideIn 0.4s ease-out; }
-        @keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-      `}</style>
+      {isOtherCategory && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-xl z-[1000] flex items-center justify-center p-8">
+              <div className="bg-white w-full max-w-xs rounded-[3rem] p-8 animate-slideUp shadow-2xl">
+                  <h3 className="text-xl font-black text-gray-900 leading-tight mb-4 text-center">Missing Something?</h3>
+                  <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest text-center mb-6 leading-relaxed">Tell us what service you are looking for, and we will find local vendors for you!</p>
+                  <input className="w-full bg-gray-50 p-5 rounded-2xl font-bold text-xs outline-none mb-4" placeholder="e.g. Band, Firecrackers..." />
+                  <button onClick={() => { setIsOtherCategory(false); alert("Request received! Our team will contact local vendors soon."); }} className="w-full bg-[#2874f0] text-white py-4 rounded-2xl font-black text-[10px] uppercase shadow-lg active:scale-95 transition-all">Submit Request</button>
+                  <button onClick={() => setIsOtherCategory(false)} className="w-full mt-4 text-[10px] font-black text-gray-400 uppercase tracking-widest">Maybe Later</button>
+              </div>
+          </div>
+      )}
     </div>
   );
 };

@@ -16,6 +16,7 @@ export interface User {
   _id?: string; // Support MongoDB style ID
   name: string;
   email: string;
+  mobile?: string; // Added mobile property to fix type error in App.tsx
   role: UserRole;
   location?: {
     lat: number;
