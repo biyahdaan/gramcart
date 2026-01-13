@@ -64,7 +64,7 @@ const BookingSchema = new mongoose.Schema({
   otp: { type: String, required: true }, 
   status: { 
     type: String, 
-    enum: ['pending', 'approved', 'awaiting_advance_verification', 'advance_paid', 'awaiting_final_verification', 'finished', 'reviewed', 'completed', 'rejected'], 
+    enum: ['pending', 'approved', 'awaiting_advance_verification', 'advance_paid', 'awaiting_final_verification', 'final_paid', 'completed', 'rejected'], 
     default: 'pending' 
   },
   review: { rating: Number, comment: String },
@@ -78,7 +78,7 @@ app.post('/api/register', async (req, res) => {
   try {
     const { name, email, mobile, password, role, location } = req.body;
     const existing = await User.findOne({ $or: [{ email }, { mobile }] });
-    if (existing) return res.status(400).json({ error: "Registered" });
+    if (existing) return res.status(400).json({ error: "Already Registered" });
     const user = new User({ name, email, mobile, password, role, location });
     await user.save();
     if (role === 'vendor') {
@@ -93,7 +93,7 @@ app.post('/api/login', async (req, res) => {
   try {
     const { identifier, password } = req.body;
     const user = await User.findOne({ $or: [{ email: identifier }, { mobile: identifier }], password });
-    if (!user) return res.status(401).json({ error: "Invalid" });
+    if (!user) return res.status(401).json({ error: "Invalid Credentials" });
     res.json({ user });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -120,7 +120,7 @@ app.get('/api/search', async (req, res) => {
     const results = await Promise.all(vendors.map(async (v) => {
       let query = { vendorId: v._id };
       if (cat) query.category = cat;
-      const services = await Service.find(query);
+      const services = await Service.find(query).sort({ createdAt: -1 });
       return { ...v, services };
     }));
     res.json(cat ? results.filter(v => v.services.length > 0) : results);
@@ -162,28 +162,6 @@ app.patch('/api/bookings/:id/status', async (req, res) => {
     const booking = await Booking.findByIdAndUpdate(req.params.id, req.body, { new: true });
     res.json(booking);
   } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.patch('/api/bookings/:id/finish', async (req, res) => {
-  try {
-    const { otp } = req.body;
-    const booking = await Booking.findById(req.params.id);
-
-    if (!booking) {
-      return res.status(404).json({ error: 'Booking not found' });
-    }
-
-    if (booking.otp !== otp) {
-      return res.status(400).json({ error: 'Invalid OTP' });
-    }
-
-    booking.status = 'finished';
-    await booking.save();
-
-    res.json(booking);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
 });
 
 app.listen(5000, () => console.log('Server running on 5000'));
