@@ -12,7 +12,8 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
-app.use(express.json());
+// Increased limit for base64 images
+app.use(express.json({ limit: '10mb' }));
 
 // --- DATABASE CONNECTION ---
 const MONGO_URI = process.env.MONGODB_URI || "mongodb+srv://biyahdaan_db_user:cUzpl0anIuBNuXb9@cluster0.hf1vhp3.mongodb.net/gramcart_db?retryWrites=true&w=majority";
@@ -45,6 +46,7 @@ const Service = mongoose.models.Service || mongoose.model('Service', new mongoos
   unitType: { type: String, default: 'Per Day' },
   rate: { type: Number, required: true },
   itemsIncluded: [String],
+  images: [String], // NEW: Array for photo URLs or Base64
   description: String,
   contactNumber: { type: String, required: true },
   createdAt: { type: Date, default: Date.now }
@@ -103,6 +105,13 @@ app.post('/api/services', async (req, res) => {
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
+app.put('/api/services/:id', async (req, res) => {
+  try {
+    const updated = await Service.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    res.json(updated);
+  } catch (err) { res.status(400).json({ error: err.message }); }
+});
+
 app.get('/api/my-services/:vendorId', async (req, res) => {
   try {
     const services = await Service.find({ vendorId: req.params.vendorId }).sort({ createdAt: -1 });
@@ -133,20 +142,16 @@ app.post('/api/bookings', async (req, res) => {
   } catch (err) { res.status(500).json({ error: "Booking error" }); }
 });
 
-// GET Bookings for specific user/vendor
 app.get('/api/my-bookings/:role/:id', async (req, res) => {
   try {
     const { role, id } = req.params;
     let query = {};
-    
     if (role === 'vendor') {
-        // If ID is userId, find the vendorId first
         const vendorDoc = await Vendor.findOne({ userId: id });
         query = { vendorId: vendorDoc ? vendorDoc._id : id };
     } else {
         query = { customerId: id };
     }
-
     const bookings = await Booking.find(query)
       .populate('customerId', 'name mobile')
       .populate('serviceId')
@@ -159,11 +164,7 @@ app.get('/api/my-bookings/:role/:id', async (req, res) => {
 app.patch('/api/bookings/:id/status', async (req, res) => {
   try {
     const { status } = req.body;
-    const booking = await Booking.findByIdAndUpdate(
-      req.params.id, 
-      { status }, 
-      { new: true }
-    );
+    const booking = await Booking.findByIdAndUpdate(req.params.id, { status }, { new: true });
     res.json(booking);
   } catch (err) { res.status(500).json({ error: "Status update failed" }); }
 });

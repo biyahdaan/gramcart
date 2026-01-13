@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Language, User, Translations, UserRole, Translation } from './types';
 import { CATEGORIES } from './constants';
 import { LanguageSwitch } from './components/LanguageSwitch';
@@ -24,14 +24,15 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(false);
   
   const [bookingTarget, setBookingTarget] = useState<any>(null);
-  const [detailTarget, setDetailTarget] = useState<any>(null); // State for viewing details
+  const [detailTarget, setDetailTarget] = useState<any>(null); 
   const [authForm, setAuthForm] = useState({ identifier: '', email: '', mobile: '', password: '', name: '', role: 'user' });
   const [serviceForm, setServiceForm] = useState({
-    title: '', category: 'tent', rate: '', unitType: 'Per Day', duration: '1 Day', itemsIncluded: [] as string[], contactNumber: '', _id: '', customItem: ''
+    title: '', category: 'tent', rate: '', unitType: 'Per Day', duration: '1 Day', 
+    itemsIncluded: [] as string[], images: [] as string[], contactNumber: '', _id: '', customItem: ''
   });
   const [bookingForm, setBookingForm] = useState({ startDate: '', endDate: '', address: '' });
 
-  const t = Translations[lang];
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const saved = localStorage.getItem('gramcart_user');
@@ -82,6 +83,30 @@ const App: React.FC = () => {
         if (res.ok) setMyServices(await res.json());
       }
     } catch (e) { console.error(e); }
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files) return;
+
+    const fileArray = Array.from(files);
+    fileArray.forEach(file => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setServiceForm(prev => ({
+          ...prev,
+          images: [...prev.images, reader.result as string].slice(0, 5) // Limit to 5
+        }));
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const removeImage = (index: number) => {
+    setServiceForm(prev => ({
+      ...prev,
+      images: prev.images.filter((_, i) => i !== index)
+    }));
   };
 
   const updateBookingStatus = async (bookingId: string, status: string) => {
@@ -159,6 +184,7 @@ const App: React.FC = () => {
         rate: Number(serviceForm.rate),
         contactNumber: serviceForm.contactNumber,
         itemsIncluded: serviceForm.itemsIncluded,
+        images: serviceForm.images,
         duration: serviceForm.duration
       };
       const res = await fetch(`${API_BASE_URL}${endpoint}`, {
@@ -168,7 +194,7 @@ const App: React.FC = () => {
       });
       if (res.ok) {
         alert(serviceForm._id ? "Service Updated!" : "Service Published!");
-        setServiceForm({ title: '', category: 'tent', rate: '', unitType: 'Per Day', duration: '1 Day', itemsIncluded: [], contactNumber: '', _id: '', customItem: '' });
+        setServiceForm({ title: '', category: 'tent', rate: '', unitType: 'Per Day', duration: '1 Day', itemsIncluded: [], images: [], contactNumber: '', _id: '', customItem: '' });
         fetchMyServices(); fetchData();
         setView('my-services');
       }
@@ -271,6 +297,18 @@ const App: React.FC = () => {
                         </div>
                         <p className="text-sm font-black text-blue-600">₹{s.rate}/<span className="text-[10px] font-normal">{s.unitType}</span></p>
                       </div>
+                      
+                      {s.images && s.images.length > 0 && (
+                        <div className="flex gap-2 mb-3 mt-1 overflow-x-auto no-scrollbar">
+                           {s.images.slice(0, 3).map((img: string, idx: number) => (
+                             <img key={idx} src={img} className="w-16 h-16 rounded-xl object-cover border border-gray-100" />
+                           ))}
+                           {s.images.length > 3 && (
+                             <div className="w-16 h-16 rounded-xl bg-gray-200 flex items-center justify-center text-[10px] font-black text-gray-500">+{s.images.length - 3}</div>
+                           )}
+                        </div>
+                      )}
+
                       <div className="flex gap-2 mt-3">
                         <button onClick={() => setDetailTarget(s)} className="flex-1 bg-white border border-gray-200 text-gray-600 py-2.5 rounded-xl text-[10px] font-black uppercase hover:bg-gray-50 active:scale-95 transition-all">
                             Details
@@ -291,9 +329,32 @@ const App: React.FC = () => {
           <div className="space-y-6">
             <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-purple-100">
               <h3 className="text-xs font-black text-purple-600 uppercase mb-5 tracking-widest flex items-center gap-2">
-                 <i className="fas fa-plus-circle"></i> Create New Listing
+                 <i className="fas fa-plus-circle"></i> {serviceForm._id ? 'Edit' : 'Create'} Listing
               </h3>
               <form onSubmit={handleAddOrUpdateService} className="space-y-4">
+                {/* Image Upload Section */}
+                <div className="bg-purple-50 p-5 rounded-2xl border border-purple-100">
+                  <p className="text-[10px] font-black text-purple-400 uppercase mb-3 flex justify-between">
+                    Upload Photos (Up to 5)
+                    <span>{serviceForm.images.length}/5</span>
+                  </p>
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    {serviceForm.images.map((img, idx) => (
+                      <div key={idx} className="relative w-16 h-16 group">
+                        <img src={img} className="w-full h-full object-cover rounded-xl border border-purple-200" />
+                        <button type="button" onClick={() => removeImage(idx)} className="absolute -top-1 -right-1 bg-red-500 text-white w-5 h-5 rounded-full flex items-center justify-center text-[8px] shadow-sm"><i className="fas fa-times"></i></button>
+                      </div>
+                    ))}
+                    {serviceForm.images.length < 5 && (
+                      <button type="button" onClick={() => fileInputRef.current?.click()} className="w-16 h-16 rounded-xl border-2 border-dashed border-purple-200 flex flex-col items-center justify-center text-purple-300 hover:border-purple-400 hover:text-purple-400 transition-all">
+                        <i className="fas fa-camera text-sm"></i>
+                        <span className="text-[8px] font-black mt-1 uppercase">Add</span>
+                      </button>
+                    )}
+                  </div>
+                  <input type="file" multiple accept="image/*" className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
+                </div>
+
                 <input placeholder="Listing Title" className="w-full bg-gray-50 p-4 rounded-2xl border border-gray-100 outline-none focus:border-purple-300" value={serviceForm.title} onChange={e => setServiceForm({...serviceForm, title: e.target.value})} required />
                 <div className="grid grid-cols-2 gap-3">
                   <select className="bg-gray-50 p-4 rounded-2xl border border-gray-100 outline-none text-[10px] font-bold" value={serviceForm.category} onChange={e => setServiceForm({...serviceForm, category: e.target.value})}>
@@ -385,11 +446,6 @@ const App: React.FC = () => {
                       </a>
                     </div>
                   )}
-                  {user?.role === UserRole.USER && b.status === 'pending' && (
-                    <div className="bg-white/50 p-3 rounded-xl text-center border border-gray-200">
-                        <p className="text-[8px] text-gray-400 font-bold italic">Vendor contact will be visible once they accept your order.</p>
-                    </div>
-                  )}
                 </div>
 
                 {user?.role === UserRole.VENDOR && b.status === 'pending' && (
@@ -411,51 +467,77 @@ const App: React.FC = () => {
             {myServices.length === 0 && <p className="text-center py-10 text-gray-400 text-[10px] uppercase font-black tracking-widest">No Services Listed Yet</p>}
             {myServices.map(s => (
               <div key={s._id} className="bg-white p-5 rounded-3xl shadow-sm border border-gray-100 flex justify-between items-center animate-slideIn">
-                <div>
-                  <p className="font-black text-gray-800 text-xs">{s.title}</p>
-                  <div className="flex gap-2 mt-1">
-                    <span className="text-[9px] text-purple-600 font-black uppercase bg-purple-50 px-2 py-0.5 rounded">{s.category}</span>
-                    <span className="text-[9px] text-gray-400 font-bold">₹{s.rate} / {s.unitType}</span>
+                <div className="flex items-center gap-3">
+                  {s.images && s.images[0] && <img src={s.images[0]} className="w-10 h-10 rounded-lg object-cover" />}
+                  <div>
+                    <p className="font-black text-gray-800 text-xs">{s.title}</p>
+                    <div className="flex gap-2 mt-1">
+                      <span className="text-[9px] text-purple-600 font-black uppercase bg-purple-50 px-2 py-0.5 rounded">{s.category}</span>
+                      <span className="text-[9px] text-gray-400 font-bold">₹{s.rate} / {s.unitType}</span>
+                    </div>
                   </div>
                 </div>
-                <button onClick={() => { setServiceForm({ ...s, itemsIncluded: s.itemsIncluded || [], customItem: '' }); setView('vendor-dashboard'); }} className="bg-gray-50 text-gray-400 hover:text-purple-600 hover:bg-purple-50 px-4 py-2 rounded-xl text-[10px] font-black transition-colors uppercase">Edit</button>
+                <button onClick={() => { setServiceForm({ ...s, itemsIncluded: s.itemsIncluded || [], images: s.images || [], customItem: '' }); setView('vendor-dashboard'); }} className="bg-gray-50 text-gray-400 hover:text-purple-600 hover:bg-purple-50 px-4 py-2 rounded-xl text-[10px] font-black transition-colors uppercase">Edit</button>
               </div>
             ))}
           </div>
         )}
       </main>
 
-      {/* Detail View Modal */}
+      {/* Detail View Modal with Image Gallery */}
       {detailTarget && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-md z-[110] flex items-center justify-center p-6">
-          <div className="bg-white w-full max-w-sm rounded-[2.5rem] p-8 animate-slideUp shadow-2xl relative">
-            <button onClick={() => setDetailTarget(null)} className="absolute top-6 right-6 w-10 h-10 rounded-full bg-gray-50 flex items-center justify-center text-gray-400"><i className="fas fa-times"></i></button>
+          <div className="bg-white w-full max-w-sm rounded-[2.5rem] overflow-hidden animate-slideUp shadow-2xl relative">
+            <button onClick={() => setDetailTarget(null)} className="absolute top-4 right-4 w-10 h-10 rounded-full bg-black/30 backdrop-blur-md flex items-center justify-center text-white z-20"><i className="fas fa-times"></i></button>
             
-            <div className="mb-6">
-                <p className="text-[10px] font-black text-blue-600 uppercase mb-1 tracking-widest">{detailTarget.category}</p>
-                <h3 className="text-xl font-black text-gray-800">{detailTarget.title}</h3>
-                <p className="text-sm font-bold text-gray-400 mt-1">₹{detailTarget.rate} / {detailTarget.unitType}</p>
+            {/* Image Gallery */}
+            <div className="relative h-64 bg-gray-100 overflow-x-auto snap-x snap-mandatory flex no-scrollbar">
+              {detailTarget.images && detailTarget.images.length > 0 ? (
+                detailTarget.images.map((img: string, idx: number) => (
+                  <img key={idx} src={img} className="w-full h-full object-cover flex-shrink-0 snap-center" />
+                ))
+              ) : (
+                <div className="w-full h-full flex flex-col items-center justify-center text-gray-300">
+                  <i className="fas fa-image text-4xl mb-2"></i>
+                  <p className="text-[10px] font-black uppercase">No Photos Available</p>
+                </div>
+              )}
+              {detailTarget.images && detailTarget.images.length > 1 && (
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-1.5 z-10">
+                   {detailTarget.images.map((_: any, idx: number) => (
+                     <div key={idx} className="w-1.5 h-1.5 rounded-full bg-white/50"></div>
+                   ))}
+                </div>
+              )}
             </div>
 
-            <div className="bg-gray-50 p-6 rounded-3xl border border-gray-100 mb-6">
-                <h4 className="text-[10px] font-black text-gray-400 uppercase mb-4 tracking-wider">What's Included (शामिल सामान)</h4>
-                {detailTarget.itemsIncluded?.length > 0 ? (
-                    <ul className="space-y-3">
-                        {detailTarget.itemsIncluded.map((item: string, idx: number) => (
-                            <li key={idx} className="flex items-center gap-3 text-xs font-bold text-gray-600">
-                                <i className="fas fa-check-circle text-green-500 text-[10px]"></i>
-                                {item}
-                            </li>
-                        ))}
-                    </ul>
-                ) : (
-                    <p className="text-xs text-gray-400 italic">No specific items listed.</p>
-                )}
-            </div>
+            <div className="p-8">
+              <div className="mb-6">
+                  <p className="text-[10px] font-black text-blue-600 uppercase mb-1 tracking-widest">{detailTarget.category}</p>
+                  <h3 className="text-xl font-black text-gray-800">{detailTarget.title}</h3>
+                  <p className="text-sm font-bold text-gray-400 mt-1">₹{detailTarget.rate} / {detailTarget.unitType}</p>
+              </div>
 
-            <button onClick={() => { setBookingTarget(detailTarget); setDetailTarget(null); }} className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-xs uppercase shadow-xl active:scale-95 transition-all">
-                Proceed to Booking
-            </button>
+              <div className="bg-gray-50 p-6 rounded-3xl border border-gray-100 mb-6 max-h-40 overflow-y-auto">
+                  <h4 className="text-[10px] font-black text-gray-400 uppercase mb-4 tracking-wider">What's Included</h4>
+                  {detailTarget.itemsIncluded?.length > 0 ? (
+                      <ul className="space-y-3">
+                          {detailTarget.itemsIncluded.map((item: string, idx: number) => (
+                              <li key={idx} className="flex items-center gap-3 text-xs font-bold text-gray-600">
+                                  <i className="fas fa-check-circle text-green-500 text-[10px]"></i>
+                                  {item}
+                              </li>
+                          ))}
+                      </ul>
+                  ) : (
+                      <p className="text-xs text-gray-400 italic">Base Service</p>
+                  )}
+              </div>
+
+              <button onClick={() => { setBookingTarget(detailTarget); setDetailTarget(null); }} className="w-full bg-blue-600 text-white py-4 rounded-2xl font-black text-xs uppercase shadow-xl active:scale-95 transition-all">
+                  Proceed to Booking
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -511,7 +593,7 @@ const App: React.FC = () => {
         {user?.role === UserRole.VENDOR && (
           <>
             <button onClick={() => setView('my-services')} className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all ${view === 'my-services' ? 'text-purple-600 bg-purple-50 shadow-inner' : 'text-gray-300 hover:text-purple-400'}`}><i className="fas fa-warehouse text-xl"></i></button>
-            <button onClick={() => { setServiceForm({ title: '', category: 'tent', rate: '', unitType: 'Per Day', duration: '1 Day', itemsIncluded: [], contactNumber: '', _id: '', customItem: '' }); setView('vendor-dashboard'); }} className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all ${view === 'vendor-dashboard' ? 'text-purple-600 bg-purple-50 shadow-inner' : 'text-gray-300 hover:text-purple-400'}`}><i className="fas fa-magic text-xl"></i></button>
+            <button onClick={() => { setServiceForm({ title: '', category: 'tent', rate: '', unitType: 'Per Day', duration: '1 Day', itemsIncluded: [], images: [], contactNumber: '', _id: '', customItem: '' }); setView('vendor-dashboard'); }} className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all ${view === 'vendor-dashboard' ? 'text-purple-600 bg-purple-50 shadow-inner' : 'text-gray-300 hover:text-purple-400'}`}><i className="fas fa-magic text-xl"></i></button>
           </>
         )}
         
