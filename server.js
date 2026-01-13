@@ -2,14 +2,31 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
 const app = express();
+const JWT_SECRET = process.env.JWT_SECRET || "gramcart_secure_9922";
 
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization'] }));
 app.use(express.json({ limit: '20mb' })); 
 
 const MONGO_URI = process.env.MONGODB_URI || "mongodb+srv://biyahdaan_db_user:cUzpl0anIuBNuXb9@cluster0.hf1vhp3.mongodb.net/gramcart_db?retryWrites=true&w=majority";
 mongoose.connect(MONGO_URI).then(() => console.log("🚀 Server Connected")).catch(err => console.error("❌ DB Error:", err));
+
+// --- Auth Middleware ---
+const authenticate = (roles = []) => {
+  return (req, res, next) => {
+    const token = req.header('Authorization')?.split(' ')[1];
+    if (!token) return res.status(401).json({ error: "Unauthorized" });
+    try {
+      const decoded = jwt.verify(token, JWT_SECRET);
+      req.user = decoded;
+      if (roles.length && !roles.includes(decoded.role)) return res.status(403).json({ error: "Forbidden" });
+      next();
+    } catch (e) { res.status(401).json({ error: "Invalid Token" }); }
+  };
+};
 
 // --- Models ---
 
@@ -23,7 +40,6 @@ const UserSchema = new mongoose.Schema({
 });
 const User = mongoose.models.User || mongoose.model('User', UserSchema);
 
-// --- MASTER ADMIN SETTINGS ---
 const AdminSettingsSchema = new mongoose.Schema({
   adminID: { type: String, default: 'admin' },
   password: { type: String, default: '123' },
@@ -83,25 +99,35 @@ const Booking = mongoose.models.Booking || mongoose.model('Booking', BookingSche
 app.post('/api/register', async (req, res) => {
   try {
     const { name, email, mobile, password, role, location } = req.body;
-    const user = new User({ name, email, mobile, password, role, location });
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
+    
+    const user = new User({ name, email, mobile, password: hashedPassword, role, location });
     await user.save();
+    
     if (role === 'vendor') {
       await new Vendor({ userId: user._id, businessName: `${name}'s Shop`, location }).save();
     }
-    res.status(201).json({ user });
+    const token = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET);
+    res.status(201).json({ user, token });
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.post('/api/login', async (req, res) => {
   try {
     const { identifier, password } = req.body;
-    const user = await User.findOne({ $or: [{ email: identifier }, { mobile: identifier }], password });
+    const user = await User.findOne({ $or: [{ email: identifier }, { mobile: identifier }] });
     if (!user) return res.status(401).json({ error: "Invalid login" });
-    res.json({ user });
+    
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) return res.status(401).json({ error: "Invalid login" });
+    
+    const token = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET);
+    res.json({ user, token });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/services', async (req, res) => {
+app.post('/api/services', authenticate(['vendor']), async (req, res) => {
   try {
     const service = new Service(req.body);
     await service.save();
@@ -109,14 +135,14 @@ app.post('/api/services', async (req, res) => {
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
-app.put('/api/services/:id', async (req, res) => {
+app.put('/api/services/:id', authenticate(['vendor', 'admin']), async (req, res) => {
   try {
     const service = await Service.findByIdAndUpdate(req.params.id, req.body, { new: true });
     res.json(service);
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
-app.delete('/api/services/:id', async (req, res) => {
+app.delete('/api/services/:id', authenticate(['vendor', 'admin']), async (req, res) => {
   try {
     await Service.findByIdAndDelete(req.params.id);
     res.json({ success: true });
@@ -134,22 +160,47 @@ app.get('/api/search', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/my-services/:vendorId', async (req, res) => {
+app.get('/api/my-services/:vendorId', authenticate(['vendor', 'admin']), async (req, res) => {
   try {
     const services = await Service.find({ vendorId: req.params.vendorId });
     res.json(services);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.post('/api/bookings', async (req, res) => {
+app.post('/api/bookings', authenticate(['user', 'vendor']), async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
   try {
+    const { serviceId, startDate, endDate } = req.body;
+    
+    // ATOMIC LOCK: Check for date conflicts before creating
+    const startStr = new Date(startDate).toISOString().split('T')[0];
+    const endStr = new Date(endDate).toISOString().split('T')[0];
+    
+    const conflict = await Service.findOne({
+      _id: serviceId,
+      blockedDates: { $in: [startStr, endStr] }
+    }).session(session);
+
+    if (conflict) {
+      await session.abortTransaction();
+      return res.status(409).json({ error: "Service booked by someone else just now." });
+    }
+
     const booking = new Booking(req.body);
-    await booking.save();
+    await booking.save({ session });
+    
+    await session.commitTransaction();
     res.status(201).json(booking);
-  } catch (err) { res.status(400).json({ error: err.message }); }
+  } catch (err) { 
+    await session.abortTransaction();
+    res.status(400).json({ error: err.message }); 
+  } finally {
+    session.endSession();
+  }
 });
 
-app.get('/api/my-bookings/:role/:id', async (req, res) => {
+app.get('/api/my-bookings/:role/:id', authenticate(), async (req, res) => {
   try {
     const { role, id } = req.params;
     let query = {};
@@ -164,12 +215,11 @@ app.get('/api/my-bookings/:role/:id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.patch('/api/bookings/:id/status', async (req, res) => {
+app.patch('/api/bookings/:id/status', authenticate(), async (req, res) => {
   try {
     const { status } = req.body;
     const booking = await Booking.findByIdAndUpdate(req.params.id, req.body, { new: true });
 
-    // --- 1. AUTO-BLOCK ON APPROVAL ---
     if (status === 'approved') {
         const startDate = new Date(booking.startDate);
         const endDate = new Date(booking.endDate);
@@ -179,7 +229,6 @@ app.patch('/api/bookings/:id/status', async (req, res) => {
             dateArray.push(curr.toISOString().split('T')[0]);
             curr.setDate(curr.getDate() + 1);
         }
-        // Auto-sync blocked dates to the service
         await Service.findByIdAndUpdate(booking.serviceId, { $addToSet: { blockedDates: { $each: dateArray } } });
     }
 
@@ -190,25 +239,25 @@ app.patch('/api/bookings/:id/status', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.patch('/api/vendors/:id', async (req, res) => {
+app.patch('/api/vendors/:id', authenticate(['vendor', 'admin']), async (req, res) => {
     try {
         const vendor = await Vendor.findByIdAndUpdate(req.params.id, { upiId: req.body.upiId }, { new: true });
         res.json(vendor);
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.get('/api/admin/settings', async (req, res) => {
+app.get('/api/admin/settings', authenticate(['admin']), async (req, res) => {
   let settings = await AdminSettings.findOne();
   if (!settings) settings = await AdminSettings.create({});
   res.json(settings);
 });
 
-app.patch('/api/admin/settings', async (req, res) => {
+app.patch('/api/admin/settings', authenticate(['admin']), async (req, res) => {
   const settings = await AdminSettings.findOneAndUpdate({}, req.body, { new: true });
   res.json(settings);
 });
 
-app.get('/api/admin/all-data', async (req, res) => {
+app.get('/api/admin/all-data', authenticate(['admin']), async (req, res) => {
   try {
       const users = await User.find().lean();
       const bookings = await Booking.find().populate('serviceId vendorId customerId').sort({ createdAt: -1 }).lean();
