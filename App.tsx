@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Language, User, Translations, UserRole, Translation } from './types';
 import { CATEGORIES, BANNERS } from './constants';
@@ -25,10 +26,11 @@ const App: React.FC = () => {
   const [publishStatus, setPublishStatus] = useState<string>(''); 
   const [searchQuery, setSearchQuery] = useState('');
   const [isListening, setIsListening] = useState(false);
+  const [userCoords, setUserCoords] = useState<{lat: number, lng: number} | null>(null);
   
   const [bookingTarget, setBookingTarget] = useState<any>(null);
   const [detailTarget, setDetailTarget] = useState<any>(null); 
-  const [reviewTarget, setReviewTarget] = useState<any>(null);
+  const [otpTarget, setOtpTarget] = useState<{id: string, code: string} | null>(null);
   
   const [authForm, setAuthForm] = useState({ identifier: '', email: '', mobile: '', password: '', name: '', role: 'user' });
   const [serviceForm, setServiceForm] = useState({
@@ -36,16 +38,33 @@ const App: React.FC = () => {
     itemsIncluded: [] as string[], images: [] as string[], contactNumber: '', _id: '', customItem: ''
   });
   const [bookingForm, setBookingForm] = useState({ startDate: '', endDate: '', address: '' });
-  const [upiForm, setUpiForm] = useState({ upiId: '', advancePercent: 10 });
-  const [reviewForm, setReviewForm] = useState({ rating: 5, comment: '' });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const proofInputRef = useRef<HTMLInputElement>(null);
 
+  // Distance Calculator Logic (Haversine Formula)
+  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    const R = 6371; // Earth radius in KM
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+  };
+
   const filteredData = data.filter(vendor => {
     const searchLower = searchQuery.toLowerCase();
-    return vendor.businessName?.toLowerCase().includes(searchLower) || 
-           vendor.services?.some((s: any) => s.title?.toLowerCase().includes(searchLower));
+    const matchesSearch = vendor.businessName?.toLowerCase().includes(searchLower) || 
+                          vendor.services?.some((s: any) => s.title?.toLowerCase().includes(searchLower));
+    
+    // Hyper-local Logic: Only show vendors within 25KM if location is available
+    if (userCoords && vendor.location) {
+        const dist = calculateDistance(userCoords.lat, userCoords.lng, vendor.location.lat, vendor.location.lng);
+        return matchesSearch && dist <= 25;
+    }
+    return matchesSearch;
   });
 
   useEffect(() => {
@@ -60,6 +79,14 @@ const App: React.FC = () => {
         }
       } catch (e) { localStorage.removeItem('gramcart_user'); }
     }
+    
+    // Get User Location for Hyper-local feature
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => setUserCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => console.log("Location access denied")
+      );
+    }
     fetchData();
   }, []);
 
@@ -68,10 +95,7 @@ const App: React.FC = () => {
         const res = await fetch(`${API_BASE_URL}/search`);
         const allVendors = await res.json();
         const v = allVendors.find((vend: any) => vend.userId === userId);
-        if (v) {
-            setVendorProfile(v);
-            setUpiForm({ upiId: v.upiId || '', advancePercent: v.advancePercent || 10 });
-        }
+        if (v) setVendorProfile(v);
     } catch (e) {}
   };
 
@@ -91,7 +115,7 @@ const App: React.FC = () => {
   };
 
   const startVoiceSearch = () => {
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitRecognition;
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) return alert("Voice Search not supported.");
     const recognition = new SpeechRecognition();
     recognition.lang = lang === Language.HI ? 'hi-IN' : 'en-US';
@@ -102,7 +126,6 @@ const App: React.FC = () => {
       setIsListening(false);
     };
     recognition.onerror = () => setIsListening(false);
-    recognition.onend = () => setIsListening(false);
   };
 
   const compressImage = (base64Str: string): Promise<string> => {
@@ -111,8 +134,7 @@ const App: React.FC = () => {
       img.src = base64Str;
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        let width = img.width;
-        let height = img.height;
+        let width = img.width; let height = img.height;
         const max_dim = 1200; 
         if (width > height) { if (width > max_dim) { height *= max_dim / width; width = max_dim; } } 
         else { if (height > max_dim) { width *= max_dim / height; height = max_dim; } }
@@ -134,15 +156,12 @@ const App: React.FC = () => {
     });
   };
 
-  const removeImage = (index: number) => setServiceForm(prev => ({ ...prev, images: prev.images.filter((_, i) => i !== index) }));
-
-  const deleteService = async (serviceId: string) => {
-    if (!window.confirm("Delete this listing?")) return;
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_BASE_URL}/services/${serviceId}`, { method: 'DELETE' });
-      if (res.ok) { fetchMyServices(); fetchData(); } 
-    } catch (e) { alert("Error deleting"); } finally { setLoading(false); }
+  // Fix: Added removeImage function to handle photo removal in vendor dashboard
+  const removeImage = (index: number) => {
+    setServiceForm(prev => ({
+      ...prev,
+      images: prev.images.filter((_, i) => i !== index)
+    }));
   };
 
   const handleAddOrUpdateService = async (e: React.FormEvent) => {
@@ -156,7 +175,8 @@ const App: React.FC = () => {
       const allV = await vRes.json();
       const v = allV.find((vend: any) => vend.userId === (user._id || user.id));
       if (!v) throw new Error("Vendor missing");
-      setPublishStatus('Uploading...');
+      
+      setPublishStatus('Uploading Details...');
       const isUpdating = !!serviceForm._id && serviceForm._id.length > 0;
       const payload = {
         title: serviceForm.title, category: serviceForm.category, description: serviceForm.description,
@@ -172,8 +192,22 @@ const App: React.FC = () => {
           setServiceForm({ title: '', category: 'tent', description: '', rate: '', unitType: 'Per Day', itemsIncluded: [], images: [], contactNumber: '', _id: '', customItem: '' });
           setPublishStatus(''); fetchMyServices(); fetchData(); setView('my-services'); setLoading(false);
         }, 1200);
-      } else { alert("Upload failed"); setLoading(false); }
-    } catch (e) { alert("Error connecting to server"); setLoading(false); }
+      } else alert("Error publishing");
+    } catch (e) { alert("Server error"); setLoading(false); }
+  };
+
+  // Fix: Added deleteService function for vendor shop management
+  const deleteService = async (serviceId: string) => {
+    if (!window.confirm("Delete this listing?")) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/services/${serviceId}`, { method: 'DELETE' });
+      if (res.ok) {
+        fetchMyServices();
+        fetchData();
+      }
+    } catch (e) { alert("Error deleting"); }
+    finally { setLoading(false); }
   };
 
   const handleAuth = async (e: React.FormEvent) => {
@@ -182,7 +216,7 @@ const App: React.FC = () => {
     const endpoint = authMode === 'login' ? '/login' : '/register';
     const payload = authMode === 'login' 
       ? { identifier: authForm.identifier, password: authForm.password } 
-      : { name: authForm.name, email: authForm.email, mobile: authForm.mobile, password: authForm.password, role: authForm.role };
+      : { ...authForm, location: userCoords };
     try {
       const res = await fetch(`${API_BASE_URL}${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const result = await res.json();
@@ -205,18 +239,22 @@ const App: React.FC = () => {
         const v = allV.find((vend: any) => vend.services.some((s: any) => s._id === bookingTarget._id));
         const diff = new Date(bookingForm.endDate).getTime() - new Date(bookingForm.startDate).getTime();
         const days = Math.max(1, Math.ceil(diff / (1000 * 60 * 60 * 24)));
+        
+        const payload = { 
+            ...bookingForm, 
+            customerId: user._id || user.id, 
+            vendorId: v._id, 
+            serviceId: bookingTarget._id, 
+            totalAmount: bookingTarget.rate * days,
+            otp: Math.floor(1000 + Math.random() * 9000).toString() // Generate OTP for security
+        };
+
         const res = await fetch(`${API_BASE_URL}/bookings`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                ...bookingForm, 
-                customerId: user._id || user.id, 
-                vendorId: v._id, 
-                serviceId: bookingTarget._id, 
-                totalAmount: bookingTarget.rate * days 
-            })
+            body: JSON.stringify(payload)
         });
-        if (res.ok) { setBookingTarget(null); setView('bookings'); fetchBookings(); } else { alert("Booking failed"); }
+        if (res.ok) { setBookingTarget(null); setView('bookings'); fetchBookings(); } else alert("Booking failed");
     } catch (e) { alert("Server error"); } finally { setLoading(false); }
   };
 
@@ -226,6 +264,22 @@ const App: React.FC = () => {
       const res = await fetch(`${API_BASE_URL}/bookings/${bookingId}/status`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       if (res.ok) fetchBookings();
     } catch (e) {} finally { setLoading(false); }
+  };
+
+  // Fix: Added handleAdvanceUpload function for processing UPI screenshot uploads
+  const handleAdvanceUpload = async (e: React.ChangeEvent<HTMLInputElement>, bookingId: string) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLoading(true);
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      try {
+        const compressed = await compressImage(reader.result as string);
+        await updateBookingStatus(bookingId, { status: 'advance_paid', advanceProof: compressed });
+      } catch (err) { alert("Upload failed"); }
+      finally { setLoading(false); }
+    };
+    reader.readAsDataURL(file);
   };
 
   const fetchBookings = async () => {
@@ -249,32 +303,18 @@ const App: React.FC = () => {
     } catch (e) {}
   };
 
-  const handleAdvanceUpload = (e: React.ChangeEvent<HTMLInputElement>, bookingId: string) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onloadend = async () => {
-      setLoading(true);
-      try {
-        await fetch(`${API_BASE_URL}/bookings/${bookingId}/status`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ advanceProof: reader.result, status: 'advance_paid' }) });
-        alert("Biyana proof uploaded!"); fetchBookings();
-      } catch (e) {} finally { setLoading(false); }
-    };
-    reader.readAsDataURL(file);
-  };
-
   const Stepper = ({ status }: { status: string }) => {
     const steps = ['pending', 'approved', 'advance_paid', 'completed'];
     const currentIndex = steps.indexOf(status);
     return (
-      <div className="flex items-center justify-between w-full mb-8 relative">
-        <div className="absolute top-[14px] left-0 right-0 h-[3px] bg-gray-100 -z-10"></div>
+      <div className="flex items-center justify-between w-full mb-8 relative px-2">
+        <div className="absolute top-[14px] left-0 right-0 h-[2px] bg-gray-100 -z-10"></div>
         {steps.map((step, index) => (
           <div key={step} className="flex flex-col items-center flex-1">
             <div className={`w-8 h-8 rounded-full border-4 border-white shadow-sm flex items-center justify-center text-[10px] font-black ${index <= currentIndex ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-400'}`}>
               {index < currentIndex ? <i className="fas fa-check"></i> : index + 1}
             </div>
-            <span className={`text-[7px] mt-2 uppercase font-black ${index <= currentIndex ? 'text-green-600' : 'text-gray-300'}`}>{step.replace('_', ' ')}</span>
+            <span className={`text-[7px] mt-2 font-black uppercase tracking-widest ${index <= currentIndex ? 'text-green-600' : 'text-gray-300'}`}>{step.replace('_', ' ')}</span>
           </div>
         ))}
       </div>
@@ -284,24 +324,24 @@ const App: React.FC = () => {
   if (!user) {
     return (
       <div className="max-w-md mx-auto min-h-screen bg-[#2874f0] flex items-center justify-center p-6">
-        <div className="bg-white w-full p-8 rounded-2xl shadow-2xl">
-          <div className="text-center mb-8"><h1 className="text-4xl font-black text-[#2874f0] italic tracking-tighter">GramCart</h1></div>
+        <div className="bg-white w-full p-8 rounded-[2rem] shadow-2xl animate-slideUp">
+          <div className="text-center mb-8"><h1 className="text-4xl font-black text-[#2874f0] italic tracking-tighter">GramCart</h1><p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mt-2">Village Marketplace</p></div>
           <form onSubmit={handleAuth} className="space-y-4">
             {authMode === 'register' && (
-              <><input placeholder="Name" className="w-full bg-gray-50 p-4 rounded-xl border outline-none" onChange={e => setAuthForm({...authForm, name: e.target.value})} required /><input placeholder="Mobile Number" className="w-full bg-gray-50 p-4 rounded-xl border outline-none" onChange={e => setAuthForm({...authForm, mobile: e.target.value})} required /></>
+              <><input placeholder="Shop/Person Name" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" onChange={e => setAuthForm({...authForm, name: e.target.value})} required /><input placeholder="Mobile Number" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" onChange={e => setAuthForm({...authForm, mobile: e.target.value})} required /></>
             )}
-            <input placeholder="Email or Mobile" className="w-full bg-gray-50 p-4 rounded-xl border outline-none" onChange={e => setAuthForm({...authForm, identifier: e.target.value})} required />
-            <input placeholder="Password" type="password" className="w-full bg-gray-50 p-4 rounded-xl border outline-none" onChange={e => setAuthForm({...authForm, password: e.target.value})} required />
+            <input placeholder="Email or Mobile" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" onChange={e => setAuthForm({...authForm, identifier: e.target.value})} required />
+            <input placeholder="Password" type="password" className="w-full bg-gray-50 p-4 rounded-xl border outline-none font-bold" onChange={e => setAuthForm({...authForm, password: e.target.value})} required />
             {authMode === 'register' && (
               <div className="flex gap-2 p-1 bg-gray-50 rounded-xl">
                 {['user', 'vendor'].map(r => (
-                  <button key={r} type="button" onClick={() => setAuthForm({...authForm, role: r})} className={`flex-1 py-2 rounded-lg text-xs font-bold ${authForm.role === r ? 'bg-[#2874f0] text-white' : 'text-gray-400'}`}>{r.toUpperCase()}</button>
+                  <button key={r} type="button" onClick={() => setAuthForm({...authForm, role: r})} className={`flex-1 py-2 rounded-lg text-xs font-black ${authForm.role === r ? 'bg-[#2874f0] text-white shadow-lg' : 'text-gray-400'}`}>{r.toUpperCase()}</button>
                 ))}
               </div>
             )}
-            <button className="w-full py-4 rounded-xl font-bold text-white bg-[#fb641b] shadow-lg">{loading ? '...' : (authMode === 'login' ? 'Login' : 'Sign Up')}</button>
+            <button className="w-full py-5 rounded-xl font-black text-white bg-[#fb641b] shadow-xl uppercase text-xs tracking-widest active:scale-95 transition-all">{loading ? 'Processing...' : (authMode === 'login' ? 'Enter Marketplace' : 'Create Account')}</button>
           </form>
-          <p className="text-center mt-6 text-xs text-[#2874f0] cursor-pointer" onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}>{authMode === 'login' ? "New User? Create Account" : "Back to Login"}</p>
+          <p className="text-center mt-6 text-[11px] font-black text-[#2874f0] cursor-pointer uppercase tracking-tighter" onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}>{authMode === 'login' ? "New to village? Sign Up" : "Already have account? Login"}</p>
         </div>
       </div>
     );
@@ -311,46 +351,55 @@ const App: React.FC = () => {
     <div className="max-w-md mx-auto min-h-screen bg-[#f1f3f6] pb-24 relative overflow-x-hidden">
       {loading && publishStatus && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-[1000] flex flex-col items-center justify-center p-8">
-            <div className="w-24 h-24 border-8 border-white/20 border-t-[#fb641b] rounded-full animate-spin mb-8 shadow-xl"></div>
-            <p className="text-white font-black text-2xl uppercase tracking-tighter animate-pulse">{publishStatus}</p>
+            <div className="w-24 h-24 border-8 border-white/20 border-t-[#fb641b] rounded-full animate-spin mb-8 shadow-2xl"></div>
+            <p className="text-white font-black text-2xl uppercase tracking-tighter animate-pulse text-center leading-tight">{publishStatus}</p>
         </div>
       )}
 
-      <header className="bg-[#2874f0] p-4 text-white sticky top-0 z-[100] shadow-md">
-        <div className="flex justify-between items-center mb-3">
-          <div className="flex items-center gap-3"><i className="fas fa-bars"></i><h1 className="text-xl font-black italic tracking-tighter">GramCart</h1></div>
+      <header className="bg-[#2874f0] p-4 text-white sticky top-0 z-[100] shadow-md rounded-b-[1.5rem]">
+        <div className="flex justify-between items-center mb-4">
+          <div className="flex items-center gap-3"><i className="fas fa-bars text-xl"></i><h1 className="text-2xl font-black italic tracking-tighter">GramCart</h1></div>
           <LanguageSwitch current={lang} onChange={setLang} />
         </div>
         <div className="relative">
-          <input placeholder={Translations[lang].searchPlaceholder} className="w-full bg-white text-gray-800 p-3.5 pl-10 pr-12 rounded-lg text-sm outline-none" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}/>
-          <i className="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
-          <button onClick={startVoiceSearch} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#2874f0] w-8 h-8 flex items-center justify-center bg-gray-50 rounded-full"><i className={`fas fa-microphone ${isListening ? 'text-red-500 animate-pulse' : ''}`}></i></button>
+          <input placeholder={Translations[lang].searchPlaceholder} className="w-full bg-white text-gray-800 p-4 pl-12 pr-14 rounded-xl text-sm outline-none shadow-inner font-bold" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}/>
+          <i className="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 text-gray-300"></i>
+          <button onClick={startVoiceSearch} className="absolute right-3 top-1/2 -translate-y-1/2 text-[#2874f0] w-10 h-10 flex items-center justify-center bg-gray-50 rounded-full shadow-md active:bg-blue-50 transition-all"><i className={`fas fa-microphone ${isListening ? 'text-red-500 animate-pulse' : ''}`}></i></button>
         </div>
       </header>
 
-      <main className="p-3">
+      <main className="p-4">
         {view === 'home' && (
-          <div className="space-y-4">
-            <div className="flex gap-4 overflow-x-auto no-scrollbar p-1">
+          <div className="space-y-6">
+            <div className="flex gap-4 overflow-x-auto no-scrollbar py-2">
                 {CATEGORIES.map(c => (
-                    <button key={c.id} onClick={() => fetchData(c.id)} className="flex flex-col items-center gap-1.5 min-w-[70px]">
-                        <div className={`w-14 h-14 rounded-full ${c.color} flex items-center justify-center shadow-md border-2 border-white`}><i className={`fas ${c.icon} text-lg`}></i></div>
-                        <span className="text-[9px] font-black text-gray-600 uppercase">{c.name}</span>
+                    <button key={c.id} onClick={() => fetchData(c.id)} className="flex flex-col items-center gap-2 min-w-[85px] group">
+                        <div className={`w-16 h-16 rounded-3xl ${c.color} flex items-center justify-center shadow-md border-4 border-white group-active:scale-90 transition-all`}><i className={`fas ${c.icon} text-xl`}></i></div>
+                        <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">{c.name}</span>
                     </button>
                 ))}
             </div>
+            
+            {filteredData.length === 0 && <div className="text-center py-20 font-black text-gray-300 uppercase text-xs tracking-widest leading-loose">No vendors nearby.<br/>Try different category!</div>}
+            
             {filteredData.map(vendor => (
-              <div key={vendor._id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mb-4">
-                <div className="flex justify-between items-center mb-4"><h4 className="font-black text-gray-800 tracking-tight">{vendor.businessName}</h4><span className="text-white bg-green-600 text-[10px] font-black px-2 py-1 rounded">4.5 ★</span></div>
+              <div key={vendor._id} className="bg-white p-5 rounded-[2rem] shadow-sm border border-gray-100 mb-6 animate-slideIn">
+                <div className="flex justify-between items-center mb-5">
+                    <div>
+                        <h4 className="font-black text-gray-800 text-lg leading-tight">{vendor.businessName}</h4>
+                        <p className="text-[9px] font-black text-blue-500 uppercase tracking-widest mt-1"><i className="fas fa-location-dot mr-1"></i> {userCoords && vendor.location ? `${calculateDistance(userCoords.lat, userCoords.lng, vendor.location.lat, vendor.location.lng).toFixed(1)} KM Away` : 'Nearby'}</p>
+                    </div>
+                    <span className="text-white bg-green-500 text-[10px] font-black px-3 py-1.5 rounded-xl shadow-lg flex items-center gap-1">4.8 <i className="fas fa-star text-[8px]"></i></span>
+                </div>
                 <div className="grid grid-cols-2 gap-4">
                   {vendor.services?.map((s: any) => (
-                    <div key={s._id} className="border border-gray-50 p-2 rounded-2xl bg-gray-50/50">
-                        <img src={s.images?.[0] || 'https://via.placeholder.com/150'} className="h-28 w-full object-cover rounded-xl mb-2" />
-                        <p className="text-[10px] font-black text-gray-700 truncate">{s.title}</p>
-                        <p className="text-[#2874f0] font-black text-sm">₹{s.rate}/-</p>
-                        <div className="flex gap-1.5 mt-3">
-                           <button onClick={() => setDetailTarget(s)} className="flex-1 bg-white border border-gray-200 text-gray-500 text-[9px] font-bold py-2 rounded-lg">Details</button>
-                           <button onClick={() => { setBookingTarget(s); setBookingForm({ startDate: '', endDate: '', address: '' }); }} className="flex-1 bg-[#fb641b] text-white text-[9px] font-black py-2 rounded-lg">Book</button>
+                    <div key={s._id} className="border border-gray-50 p-2.5 rounded-3xl bg-gray-50/50 group hover:bg-white transition-all shadow-sm">
+                        <img src={s.images?.[0] || 'https://via.placeholder.com/300'} className="h-32 w-full object-cover rounded-2xl mb-3 shadow-inner" />
+                        <p className="text-[11px] font-black text-gray-700 truncate mb-1 uppercase tracking-tighter">{s.title}</p>
+                        <p className="text-[#2874f0] font-black text-sm">₹{s.rate}/- <span className="text-[8px] text-gray-400 font-bold uppercase">{s.unitType}</span></p>
+                        <div className="flex gap-2 mt-4">
+                           <button onClick={() => setDetailTarget(s)} className="flex-1 bg-white border border-gray-200 text-gray-400 text-[9px] font-black py-2.5 rounded-xl hover:bg-gray-50">Details</button>
+                           <button onClick={() => { setBookingTarget(s); setBookingForm({ startDate: '', endDate: '', address: '' }); }} className="flex-1 bg-[#fb641b] text-white text-[9px] font-black py-2.5 rounded-xl shadow-md active:scale-95 transition-all">Book</button>
                         </div>
                     </div>
                   ))}
@@ -361,154 +410,169 @@ const App: React.FC = () => {
         )}
 
         {view === 'vendor-dashboard' && user?.role === UserRole.VENDOR && (
-          <div className="space-y-6">
-            <div className="bg-white p-6 rounded-[2.5rem] shadow-sm">
-              <h3 className="text-sm font-black text-[#2874f0] uppercase mb-8 tracking-widest text-center">{serviceForm._id ? 'Update Listing' : 'Publish Service'}</h3>
+          <div className="space-y-6 animate-slideIn">
+            <div className="bg-white p-6 rounded-[2.5rem] shadow-sm border border-gray-100">
+              <h3 className="text-sm font-black text-[#2874f0] uppercase mb-8 tracking-widest text-center border-b pb-4">{serviceForm._id ? 'Edit Service' : 'List New Service'}</h3>
               <form onSubmit={handleAddOrUpdateService} className="space-y-6">
-                <div className="bg-blue-50/50 p-6 rounded-3xl border border-blue-100">
-                  <p className="text-[10px] font-black text-blue-400 uppercase mb-4 flex justify-between">Photos <span>{serviceForm.images.length}/5</span></p>
+                <div className="bg-blue-50/50 p-6 rounded-[2rem] border border-blue-100">
+                  <p className="text-[10px] font-black text-blue-400 uppercase mb-4 flex justify-between tracking-widest">Photos (Max 5) <span>{serviceForm.images.length}/5</span></p>
                   <div className="flex flex-wrap gap-3">
                     {serviceForm.images.map((img, idx) => (
-                      <div key={idx} className="relative w-16 h-16"><img src={img} className="w-full h-full object-cover rounded-xl shadow-md" /><button type="button" onClick={() => removeImage(idx)} className="absolute -top-1 -right-1 bg-red-500 text-white w-5 h-5 rounded-full text-[10px] flex items-center justify-center"><i className="fas fa-times"></i></button></div>
+                      <div key={idx} className="relative w-20 h-20"><img src={img} className="w-full h-full object-cover rounded-2xl shadow-lg" /><button type="button" onClick={() => removeImage(idx)} className="absolute -top-2 -right-2 bg-red-500 text-white w-6 h-6 rounded-full text-[10px] flex items-center justify-center shadow-xl"><i className="fas fa-times"></i></button></div>
                     ))}
                     {serviceForm.images.length < 5 && (
-                      <button type="button" onClick={() => fileInputRef.current?.click()} className="w-16 h-16 rounded-xl border-2 border-dashed border-blue-200 text-blue-300 flex items-center justify-center bg-white"><i className="fas fa-camera text-xl"></i></button>
+                      <button type="button" onClick={() => fileInputRef.current?.click()} className="w-20 h-20 rounded-2xl border-2 border-dashed border-blue-200 text-blue-300 flex items-center justify-center bg-white shadow-inner active:scale-95 transition-all"><i className="fas fa-camera text-2xl"></i></button>
                     )}
                   </div>
                   <input type="file" multiple accept="image/*" className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
                 </div>
-                <input placeholder="Service Title" className="w-full bg-gray-50 p-4 rounded-xl border outline-none" value={serviceForm.title} onChange={e => setServiceForm({...serviceForm, title: e.target.value})} required />
-                <div className="grid grid-cols-2 gap-3">
-                   <select className="bg-gray-50 p-4 rounded-xl text-xs font-black" value={serviceForm.category} onChange={e => setServiceForm({...serviceForm, category: e.target.value})}>
+                <input placeholder="Service Title (e.g. Maharaja DJ)" className="w-full bg-gray-50 p-4 rounded-xl border-none outline-none font-bold text-sm shadow-inner" value={serviceForm.title} onChange={e => setServiceForm({...serviceForm, title: e.target.value})} required />
+                <div className="grid grid-cols-2 gap-4">
+                   <select className="bg-gray-50 p-4 rounded-xl font-black text-xs text-gray-500 shadow-inner" value={serviceForm.category} onChange={e => setServiceForm({...serviceForm, category: e.target.value})}>
                      {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                    </select>
-                   <select className="bg-gray-50 p-4 rounded-xl text-xs font-black" value={serviceForm.unitType} onChange={e => setServiceForm({...serviceForm, unitType: e.target.value})}>
+                   <select className="bg-gray-50 p-4 rounded-xl font-black text-xs text-gray-500 shadow-inner" value={serviceForm.unitType} onChange={e => setServiceForm({...serviceForm, unitType: e.target.value})}>
                      <option>Per Day</option><option>Per Piece</option><option>Per Plate</option>
                    </select>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                   <input placeholder="Price (₹)" type="number" className="bg-gray-50 p-4 rounded-xl text-sm" value={serviceForm.rate} onChange={e => setServiceForm({...serviceForm, rate: e.target.value})} required />
-                   <input placeholder="Phone" type="tel" className="bg-gray-50 p-4 rounded-xl text-sm" value={serviceForm.contactNumber} onChange={e => setServiceForm({...serviceForm, contactNumber: e.target.value})} required />
+                <div className="grid grid-cols-2 gap-4">
+                   <input placeholder="Price (₹)" type="number" className="bg-gray-50 p-4 rounded-xl font-bold text-sm shadow-inner" value={serviceForm.rate} onChange={e => setServiceForm({...serviceForm, rate: e.target.value})} required />
+                   <input placeholder="Contact Phone" type="tel" className="bg-gray-50 p-4 rounded-xl font-bold text-sm shadow-inner" value={serviceForm.contactNumber} onChange={e => setServiceForm({...serviceForm, contactNumber: e.target.value})} required />
                 </div>
-                <div className="bg-gray-50 p-6 rounded-3xl">
-                  <p className="text-[10px] font-black text-gray-400 uppercase mb-4">Inventory</p>
-                  <div className="flex flex-wrap gap-2 mb-4">
+                <div className="bg-gray-50 p-6 rounded-[2rem] shadow-inner">
+                  <p className="text-[10px] font-black text-gray-400 uppercase mb-4 tracking-widest">Select Items Included</p>
+                  <div className="flex flex-wrap gap-2 mb-6">
                     {(PRESETS[serviceForm.category] || []).map(item => (
                       <button key={item} type="button" onClick={() => {
                         const exists = serviceForm.itemsIncluded.includes(item);
                         setServiceForm({ ...serviceForm, itemsIncluded: exists ? serviceForm.itemsIncluded.filter(i => i !== item) : [...serviceForm.itemsIncluded, item] });
-                      }} className={`px-3 py-2 rounded-lg text-[9px] font-black border ${serviceForm.itemsIncluded.includes(item) ? 'bg-[#2874f0] text-white' : 'bg-white text-gray-400'}`}>{item}</button>
+                      }} className={`px-4 py-2 rounded-xl text-[10px] font-black border-2 transition-all ${serviceForm.itemsIncluded.includes(item) ? 'bg-[#2874f0] text-white border-[#2874f0] shadow-md' : 'bg-white text-gray-400 border-gray-100'}`}>{item}</button>
                     ))}
                   </div>
-                  <div className="flex gap-2"><input placeholder="Add other..." className="flex-1 bg-white p-3 rounded-xl text-xs" value={serviceForm.customItem || ''} onChange={e => setServiceForm({...serviceForm, customItem: e.target.value})} /><button type="button" onClick={() => { if(serviceForm.customItem) setServiceForm({...serviceForm, itemsIncluded: [...serviceForm.itemsIncluded, serviceForm.customItem], customItem: ''})} } className="bg-[#2874f0] text-white px-5 py-2 rounded-xl text-xs">ADD</button></div>
+                  <div className="flex gap-2"><input placeholder="Manual item..." className="flex-1 bg-white p-4 rounded-xl text-xs font-bold shadow-inner" value={serviceForm.customItem || ''} onChange={e => setServiceForm({...serviceForm, customItem: e.target.value})} /><button type="button" onClick={() => { if(serviceForm.customItem) setServiceForm({...serviceForm, itemsIncluded: [...serviceForm.itemsIncluded, serviceForm.customItem], customItem: ''})} } className="bg-[#2874f0] text-white px-6 py-2 rounded-xl text-xs font-black shadow-lg">ADD</button></div>
                 </div>
-                <textarea placeholder="Description" className="w-full bg-gray-50 p-4 rounded-xl text-sm h-32 outline-none" value={serviceForm.description} onChange={e => setServiceForm({...serviceForm, description: e.target.value})} />
-                <button type="submit" className="w-full bg-[#fb641b] text-white py-5 rounded-2xl font-black uppercase text-xs shadow-xl tracking-widest">Publish Live</button>
+                <textarea placeholder="Tell customer about your service quality..." className="w-full bg-gray-50 p-4 rounded-xl font-medium text-sm h-40 outline-none shadow-inner" value={serviceForm.description} onChange={e => setServiceForm({...serviceForm, description: e.target.value})} />
+                <button type="submit" className="w-full bg-[#fb641b] text-white py-5 rounded-2xl font-black uppercase text-xs shadow-2xl tracking-widest active:scale-95 transition-all">Publish Service Live</button>
               </form>
             </div>
           </div>
         )}
 
-        {view === 'my-services' && (
-          <div className="space-y-4">
-             <h2 className="text-lg font-black text-gray-800 mb-6 uppercase tracking-widest text-xs border-l-4 border-[#2874f0] pl-4">My Storefront</h2>
-             {myServices.map(s => (
-               <div key={s._id} className="bg-white p-5 rounded-3xl shadow-sm flex items-center gap-5 border border-gray-50">
-                  <img src={s.images?.[0] || 'https://via.placeholder.com/150'} className="w-20 h-20 rounded-2xl object-cover" />
-                  <div className="flex-1">
-                      <p className="font-black text-gray-800 text-[12px] uppercase truncate w-32 tracking-tight">{s.title}</p>
-                      <p className="text-[#2874f0] text-[10px] font-black mt-1">₹{s.rate} / {s.unitType}</p>
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    <button onClick={() => deleteService(s._id)} className="w-9 h-9 rounded-xl bg-red-50 text-red-500 flex items-center justify-center shadow-sm"><i className="fas fa-trash text-xs"></i></button>
-                    <button onClick={() => { setServiceForm({ ...s, customItem: '' }); setView('vendor-dashboard'); }} className="w-9 h-9 rounded-xl bg-blue-50 text-blue-500 flex items-center justify-center shadow-sm"><i className="fas fa-edit text-xs"></i></button>
-                  </div>
+        {view === 'bookings' && (
+          <div className="space-y-6">
+             <h2 className="text-xl font-black text-gray-800 border-l-8 border-[#fb641b] pl-4 mb-6 uppercase tracking-tighter">Current Orders</h2>
+             {bookings.length === 0 && <div className="text-center py-20 font-black text-gray-300 uppercase text-xs">No active bookings.</div>}
+             {bookings.map(b => (
+               <div key={b._id} className="bg-white p-6 rounded-[2.5rem] shadow-sm mb-6 border border-gray-50 animate-slideIn">
+                 <div className="flex justify-between items-start mb-6">
+                    <div>
+                        <p className="text-[10px] font-black text-[#2874f0] uppercase tracking-widest mb-1">{b.serviceId?.title}</p>
+                        <h4 className="font-black text-gray-800 text-lg leading-tight">{user?.role === UserRole.VENDOR ? b.customerId?.name : b.vendorId?.businessName}</h4>
+                    </div>
+                    <span className={`text-[8px] font-black uppercase px-4 py-2 rounded-full shadow-sm ${b.status === 'completed' ? 'bg-green-100 text-green-600' : 'bg-blue-50 text-blue-600'}`}>{b.status}</span>
+                 </div>
+                 <Stepper status={b.status} />
+                 
+                 <div className="bg-gray-50 p-5 rounded-3xl text-[10px] font-black text-gray-600 space-y-3 shadow-inner">
+                    <div className="flex justify-between uppercase tracking-widest"><span>Booking Dates:</span><span className="text-gray-900">{new Date(b.startDate).toLocaleDateString()} - {new Date(b.endDate).toLocaleDateString()}</span></div>
+                    <div className="flex justify-between border-t border-gray-200 pt-3"><span>Delivery Location:</span><span className="text-gray-900 line-clamp-1">{b.address}</span></div>
+                    <div className="flex justify-between border-t border-gray-200 pt-3"><span>Total Bill:</span><span className="text-gray-900 text-sm">₹{b.totalAmount}</span></div>
+                 </div>
+
+                 {user?.role === UserRole.USER && b.status === 'approved' && (
+                    <div className="mt-6 p-5 bg-blue-50 rounded-[2rem] border-2 border-dashed border-blue-200 text-center animate-pulse">
+                        <p className="text-[10px] font-black text-blue-800 uppercase mb-4 tracking-widest">Pay Biyana (Advance) to UPI: {b.vendorId?.upiId}</p>
+                        <input type="file" className="hidden" ref={proofInputRef} onChange={(e) => handleAdvanceUpload(e, b._id)} />
+                        <button onClick={() => proofInputRef.current?.click()} className="w-full bg-[#2874f0] text-white py-4 rounded-xl text-[10px] font-black uppercase shadow-lg">Upload UPI Screenshot</button>
+                    </div>
+                 )}
+
+                 {user?.role === UserRole.USER && b.status === 'advance_paid' && (
+                    <div className="mt-6 p-5 bg-green-50 rounded-[2rem] text-center">
+                        <p className="text-[10px] font-black text-green-800 uppercase mb-4">Your Completion OTP (Deliver to Vendor)</p>
+                        <div className="text-3xl font-black text-green-600 tracking-[1rem] bg-white py-4 rounded-2xl shadow-inner">{b.otp}</div>
+                    </div>
+                 )}
+
+                 {user?.role === UserRole.VENDOR && b.status === 'pending' && (
+                    <div className="flex gap-4 mt-6">
+                      <button onClick={() => updateBookingStatus(b._id, { status: 'approved' })} className="flex-1 bg-green-500 text-white py-4 rounded-2xl text-[10px] font-black uppercase shadow-xl active:scale-95 transition-all">Approve Booking</button>
+                      <button onClick={() => updateBookingStatus(b._id, { status: 'rejected' })} className="flex-1 bg-red-50 text-red-500 py-4 rounded-2xl text-[10px] font-black uppercase border-2 border-red-50 shadow-sm active:scale-95 transition-all">Reject</button>
+                    </div>
+                 )}
+
+                 {user?.role === UserRole.VENDOR && b.status === 'advance_paid' && (
+                    <button onClick={() => setOtpTarget({ id: b._id, code: '' })} className="w-full mt-6 bg-[#2874f0] text-white py-4 rounded-2xl text-[10px] font-black uppercase shadow-xl tracking-widest active:scale-95 transition-all">Enter Service OTP</button>
+                 )}
                </div>
              ))}
           </div>
         )}
 
-        {view === 'bookings' && (
-          <div className="space-y-6">
-             <h2 className="text-lg font-black text-gray-800 border-l-4 border-[#fb641b] pl-3 mb-4">Orders Sync</h2>
-             {bookings.map(b => (
-               <div key={b._id} className="bg-white p-6 rounded-[2rem] shadow-sm mb-4">
-                 <div className="flex justify-between items-start mb-6">
-                    <div>
-                        <p className="text-[9px] font-black text-[#2874f0] uppercase tracking-widest mb-1">{b.serviceId?.title}</p>
-                        <h4 className="font-black text-gray-800 text-lg">{user?.role === UserRole.VENDOR ? b.customerId?.name : b.vendorId?.businessName}</h4>
-                    </div>
-                    <span className="text-[8px] font-black uppercase px-3 py-1.5 rounded-full bg-blue-50 text-blue-600">{b.status}</span>
-                 </div>
-                 <Stepper status={b.status} />
-                 <div className="bg-gray-50 p-4 rounded-2xl text-[10px] font-bold text-gray-600">
-                    <div className="flex justify-between"><span>Date:</span><span>{new Date(b.startDate).toDateString()}</span></div>
-                    <div className="flex justify-between mt-2"><span>Total Bill:</span><span className="text-gray-800 font-black">₹{b.totalAmount}</span></div>
-                 </div>
-                 {user?.role === UserRole.USER && b.status === 'approved' && (
-                    <div className="mt-4 p-4 bg-blue-50 rounded-2xl border-2 border-dashed border-blue-200 text-center">
-                        <p className="text-[10px] font-black text-blue-800 uppercase mb-3">UPI: {b.vendorId?.upiId} (Biyana: ₹{Math.round(b.totalAmount * 0.1)})</p>
-                        <input type="file" className="hidden" ref={proofInputRef} onChange={(e) => handleAdvanceUpload(e, b._id)} />
-                        <button onClick={() => proofInputRef.current?.click()} className="w-full bg-[#2874f0] text-white py-3 rounded-xl text-[10px] font-black uppercase">Upload Payment Screenshot</button>
-                    </div>
-                 )}
-                 {user?.role === UserRole.VENDOR && b.status === 'pending' && (
-                    <div className="flex gap-3 mt-4">
-                      <button onClick={() => updateBookingStatus(b._id, { status: 'approved' })} className="flex-1 bg-green-500 text-white py-3 rounded-xl text-[10px] font-black uppercase">Approve</button>
-                      <button onClick={() => updateBookingStatus(b._id, { status: 'rejected' })} className="flex-1 bg-red-100 text-red-500 py-3 rounded-xl text-[10px] font-black uppercase">Reject</button>
-                    </div>
-                 )}
+        {view === 'my-services' && (
+          <div className="space-y-6 animate-slideIn">
+             <h2 className="text-lg font-black text-gray-800 mb-6 uppercase tracking-widest text-xs border-l-8 border-[#2874f0] pl-4">Your Listings</h2>
+             {myServices.map(s => (
+               <div key={s._id} className="bg-white p-5 rounded-[2.5rem] shadow-sm flex items-center gap-6 border border-gray-50 transition-all active:scale-95">
+                  <img src={s.images?.[0] || 'https://via.placeholder.com/300'} className="w-24 h-24 rounded-3xl object-cover shadow-md" />
+                  <div className="flex-1">
+                      <p className="font-black text-gray-800 text-[13px] uppercase truncate w-32 tracking-tighter">{s.title}</p>
+                      <p className="text-[#2874f0] text-[11px] font-black mt-1">₹{s.rate} / {s.unitType}</p>
+                      <p className="text-[9px] text-gray-400 font-bold mt-2 uppercase tracking-widest">{s.itemsIncluded?.length || 0} Items</p>
+                  </div>
+                  <div className="flex flex-col gap-3">
+                    <button onClick={() => deleteService(s._id)} className="w-10 h-10 rounded-2xl bg-red-50 text-red-500 flex items-center justify-center shadow-sm"><i className="fas fa-trash text-sm"></i></button>
+                    <button onClick={() => { setServiceForm({ ...s, customItem: '' }); setView('vendor-dashboard'); }} className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center shadow-sm"><i className="fas fa-edit text-sm"></i></button>
+                  </div>
                </div>
              ))}
           </div>
         )}
       </main>
 
-      {/* FOOTER NAV */}
-      <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white h-24 flex items-center justify-around shadow-2xl z-[150] rounded-t-[3rem] px-8 border-t border-gray-50">
-        <button onClick={() => setView('home')} className={`flex flex-col items-center gap-2 ${view === 'home' ? 'text-[#2874f0] scale-110' : 'text-gray-300'}`}><i className="fas fa-home text-xl"></i><span className="text-[8px] font-black uppercase">Home</span></button>
-        <button onClick={() => { setView('bookings'); fetchBookings(); }} className={`flex flex-col items-center gap-2 ${view === 'bookings' ? 'text-[#2874f0] scale-110' : 'text-gray-300'}`}><i className="fas fa-calendar text-xl"></i><span className="text-[8px] font-black uppercase">Orders</span></button>
+      {/* FIXED NAV BAR */}
+      <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-white h-24 flex items-center justify-around shadow-[0_-20px_60px_-15px_rgba(0,0,0,0.1)] z-[150] rounded-t-[3.5rem] px-8 border-t border-gray-100">
+        <button onClick={() => setView('home')} className={`flex flex-col items-center gap-2 transition-all ${view === 'home' ? 'text-[#2874f0] scale-125' : 'text-gray-300'}`}><i className="fas fa-home text-xl"></i><span className="text-[8px] font-black uppercase tracking-widest">Home</span></button>
+        <button onClick={() => { setView('bookings'); fetchBookings(); }} className={`flex flex-col items-center gap-2 transition-all ${view === 'bookings' ? 'text-[#2874f0] scale-125' : 'text-gray-300'}`}><i className="fas fa-shopping-bag text-xl"></i><span className="text-[8px] font-black uppercase tracking-widest">Orders</span></button>
         {user?.role === UserRole.VENDOR && (
           <>
-            <button onClick={() => setView('my-services')} className={`flex flex-col items-center gap-2 ${view === 'my-services' ? 'text-[#2874f0] scale-110' : 'text-gray-300'}`}><i className="fas fa-store text-xl"></i><span className="text-[8px] font-black uppercase">Store</span></button>
-            <button onClick={() => { setServiceForm({title: '', category: 'tent', description: '', rate: '', unitType: 'Per Day', itemsIncluded: [], images: [], contactNumber: '', _id: '', customItem: ''}); setView('vendor-dashboard'); }} className={`flex flex-col items-center gap-2 ${view === 'vendor-dashboard' ? 'text-[#2874f0] scale-110' : 'text-gray-300'}`}><i className="fas fa-plus-circle text-xl"></i><span className="text-[8px] font-black uppercase">Add</span></button>
+            <button onClick={() => setView('my-services')} className={`flex flex-col items-center gap-2 transition-all ${view === 'my-services' ? 'text-[#2874f0] scale-125' : 'text-gray-300'}`}><i className="fas fa-store text-xl"></i><span className="text-[8px] font-black uppercase tracking-widest">Shop</span></button>
+            <button onClick={() => { setServiceForm({title: '', category: 'tent', description: '', rate: '', unitType: 'Per Day', itemsIncluded: [], images: [], contactNumber: '', _id: '', customItem: ''}); setView('vendor-dashboard'); }} className={`flex flex-col items-center gap-2 transition-all ${view === 'vendor-dashboard' ? 'text-[#2874f0] scale-125' : 'text-gray-300'}`}><i className="fas fa-plus-circle text-xl"></i><span className="text-[8px] font-black uppercase tracking-widest">List</span></button>
           </>
         )}
-        <button onClick={() => { localStorage.clear(); setUser(null); }} className="text-red-200"><i className="fas fa-power-off text-xl"></i></button>
+        <button onClick={() => { localStorage.clear(); setUser(null); }} className="text-red-200 transition-all hover:text-red-500"><i className="fas fa-power-off text-xl"></i></button>
       </nav>
 
-      {/* DETAIL MODAL */}
+      {/* DETAIL MODAL - CUSTOMER VIEW */}
       {detailTarget && (
-        <div className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center p-4 backdrop-blur-sm overflow-y-auto">
-           <div className="bg-white w-full rounded-[2.5rem] p-6 animate-slideUp max-h-[90vh] overflow-y-auto">
-              <div className="flex justify-between items-center mb-6">
-                 <h2 className="text-xl font-black text-gray-800 tracking-tight">{detailTarget.title}</h2>
-                 <button onClick={() => setDetailTarget(null)} className="text-gray-300 hover:text-red-500"><i className="fas fa-times-circle text-2xl"></i></button>
-              </div>
-              <div className="flex gap-2 overflow-x-auto no-scrollbar mb-6">
+        <div className="fixed inset-0 bg-black/70 z-[200] flex items-center justify-center p-5 backdrop-blur-md overflow-y-auto">
+           <div className="bg-white w-full rounded-[3rem] p-8 animate-slideUp max-h-[90vh] overflow-y-auto shadow-2xl relative">
+              <button onClick={() => setDetailTarget(null)} className="absolute top-6 right-6 text-gray-300 hover:text-red-500 transition-all"><i className="fas fa-times-circle text-3xl"></i></button>
+              <h2 className="text-2xl font-black text-gray-800 tracking-tighter mb-6 mt-2">{detailTarget.title}</h2>
+              <div className="flex gap-4 overflow-x-auto no-scrollbar mb-8 py-2">
                  {(detailTarget.images || []).map((img: string, i: number) => (
-                    <img key={i} src={img} className="h-48 w-64 object-cover rounded-2xl flex-shrink-0 shadow-sm" />
+                    <img key={i} src={img} className="h-56 w-72 object-cover rounded-[2rem] flex-shrink-0 shadow-lg border-4 border-white" />
                  ))}
               </div>
-              <div className="space-y-6">
-                 <div className="bg-blue-50 p-4 rounded-2xl">
-                    <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-2">Description</p>
-                    <p className="text-sm text-gray-700 font-medium leading-relaxed">{detailTarget.description}</p>
+              <div className="space-y-8">
+                 <div className="bg-blue-50/50 p-6 rounded-[2rem] border border-blue-50">
+                    <p className="text-[10px] font-black text-blue-400 uppercase tracking-widest mb-3">Service Description</p>
+                    <p className="text-sm text-gray-700 font-bold leading-relaxed">{detailTarget.description}</p>
                  </div>
-                 <div className="bg-gray-50 p-4 rounded-2xl">
-                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-4">Inventory List</p>
-                    <div className="flex flex-wrap gap-2">
+                 <div className="bg-gray-50/50 p-6 rounded-[2rem]">
+                    <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-5">Items & Inventory Included</p>
+                    <div className="flex flex-wrap gap-3">
                        {(detailTarget.itemsIncluded || []).map((item: string, i: number) => (
-                          <span key={i} className="bg-white border px-3 py-1.5 rounded-lg text-[10px] font-black text-gray-600 shadow-sm flex items-center gap-2"><i className="fas fa-check text-green-500"></i> {item}</span>
+                          <span key={i} className="bg-white border-2 border-gray-50 px-5 py-2.5 rounded-2xl text-[11px] font-black text-gray-600 shadow-sm flex items-center gap-2"><i className="fas fa-check-circle text-green-500"></i> {item}</span>
                        ))}
                     </div>
                  </div>
-                 <div className="flex gap-4">
-                    <div className="flex-1 bg-gray-50 p-4 rounded-2xl">
-                       <p className="text-[9px] font-black text-gray-400 uppercase mb-1">Rate</p>
-                       <p className="text-lg font-black text-[#2874f0]">₹{detailTarget.rate}/-</p>
+                 <div className="flex gap-4 sticky bottom-0 bg-white py-4 border-t border-gray-50">
+                    <div className="flex-1 bg-gray-50 p-5 rounded-[1.5rem] shadow-inner">
+                       <p className="text-[9px] font-black text-gray-400 uppercase mb-1">Total Rate</p>
+                       <p className="text-xl font-black text-[#2874f0]">₹{detailTarget.rate}/-</p>
                     </div>
-                    <button onClick={() => { setBookingTarget(detailTarget); setDetailTarget(null); }} className="flex-[2] bg-[#fb641b] text-white rounded-2xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition-all">Book Service Now</button>
+                    <button onClick={() => { setBookingTarget(detailTarget); setDetailTarget(null); }} className="flex-[2] bg-[#fb641b] text-white rounded-[1.5rem] font-black uppercase tracking-widest text-xs shadow-2xl active:scale-95 transition-all">Book Service Now</button>
                  </div>
               </div>
            </div>
@@ -517,24 +581,49 @@ const App: React.FC = () => {
 
       {/* BOOKING MODAL */}
       {bookingTarget && (
-        <div className="fixed inset-0 bg-black/60 z-[200] flex items-center justify-center p-6 backdrop-blur-sm">
-           <div className="bg-white w-full rounded-[2.5rem] p-8 animate-slideUp">
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-lg font-black text-gray-800 uppercase tracking-tight">Booking Request</h2>
-                <button onClick={() => setBookingTarget(null)} className="text-gray-300"><i className="fas fa-times"></i></button>
+        <div className="fixed inset-0 bg-black/60 z-[300] flex items-center justify-center p-6 backdrop-blur-sm">
+           <div className="bg-white w-full rounded-[3rem] p-10 animate-slideUp shadow-2xl border-t-8 border-[#fb641b]">
+              <div className="flex justify-between items-center mb-8">
+                <h2 className="text-xl font-black text-gray-800 uppercase tracking-tighter">Booking Details</h2>
+                <button onClick={() => setBookingTarget(null)} className="text-gray-300 hover:text-red-500 transition-all"><i className="fas fa-times text-xl"></i></button>
               </div>
-              <form onSubmit={handleBooking} className="space-y-4">
-                 <div className="bg-gray-50 p-4 rounded-2xl">
-                    <p className="text-[10px] font-black text-gray-400 uppercase mb-2">Service</p>
-                    <p className="font-black text-gray-800">{bookingTarget.title}</p>
+              <form onSubmit={handleBooking} className="space-y-6">
+                 <div className="bg-gray-50 p-5 rounded-2xl shadow-inner">
+                    <p className="text-[10px] font-black text-gray-400 uppercase mb-2">Service Selection</p>
+                    <p className="font-black text-gray-800 uppercase tracking-tight">{bookingTarget.title}</p>
                  </div>
-                 <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1"><p className="text-[8px] font-black text-gray-400 uppercase ml-1">From Date</p><input type="date" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-bold" required onChange={e => setBookingForm({...bookingForm, startDate: e.target.value})} /></div>
-                    <div className="space-y-1"><p className="text-[8px] font-black text-gray-400 uppercase ml-1">To Date</p><input type="date" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-bold" required onChange={e => setBookingForm({...bookingForm, endDate: e.target.value})} /></div>
+                 <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2"><p className="text-[9px] font-black text-gray-400 uppercase ml-1">Event Start</p><input type="date" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-black shadow-inner" required onChange={e => setBookingForm({...bookingForm, startDate: e.target.value})} /></div>
+                    <div className="space-y-2"><p className="text-[9px] font-black text-gray-400 uppercase ml-1">Event End</p><input type="date" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-black shadow-inner" required onChange={e => setBookingForm({...bookingForm, endDate: e.target.value})} /></div>
                  </div>
-                 <textarea placeholder="Service Address (Village/Gully)" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-bold h-24 outline-none" required onChange={e => setBookingForm({...bookingForm, address: e.target.value})} />
-                 <button type="submit" className="w-full bg-[#fb641b] text-white py-5 rounded-2xl font-black uppercase text-xs shadow-xl tracking-widest active:scale-95 transition-all">Submit Booking Request</button>
+                 <div className="space-y-2">
+                    <p className="text-[9px] font-black text-gray-400 uppercase ml-1">Event Venue / Address</p>
+                    <textarea placeholder="e.g. Village Rampur, Near Main Gate" className="w-full bg-gray-50 p-5 rounded-xl text-xs font-black h-28 outline-none shadow-inner" required onChange={e => setBookingForm({...bookingForm, address: e.target.value})} />
+                 </div>
+                 <button type="submit" className="w-full bg-[#fb641b] text-white py-6 rounded-2xl font-black uppercase text-xs shadow-2xl tracking-widest active:scale-95 transition-all">Submit Request</button>
               </form>
+           </div>
+        </div>
+      )}
+
+      {/* OTP VERIFICATION MODAL - VENDOR VIEW */}
+      {otpTarget && (
+        <div className="fixed inset-0 bg-black/60 z-[300] flex items-center justify-center p-6 backdrop-blur-sm">
+           <div className="bg-white w-full rounded-[2rem] p-8 animate-slideUp text-center">
+              <h2 className="text-lg font-black text-gray-800 mb-4 uppercase">Verify Delivery OTP</h2>
+              <p className="text-[10px] font-bold text-gray-400 mb-6">Ask customer for the 4-digit security code.</p>
+              <input type="text" maxLength={4} className="w-full bg-gray-50 p-6 rounded-2xl text-3xl font-black text-center tracking-[1rem] outline-none shadow-inner mb-6" value={otpTarget.code} onChange={(e) => setOtpTarget({...otpTarget, code: e.target.value})} />
+              <div className="flex gap-4">
+                  <button onClick={() => setOtpTarget(null)} className="flex-1 bg-gray-100 text-gray-400 py-4 rounded-xl text-[10px] font-black uppercase">Back</button>
+                  <button onClick={() => {
+                      const book = bookings.find(b => b._id === otpTarget.id);
+                      if (book?.otp === otpTarget.code) {
+                          updateBookingStatus(otpTarget.id, { status: 'completed' });
+                          setOtpTarget(null);
+                          alert("Order Completed & Payment Released!");
+                      } else alert("Invalid OTP! Try again.");
+                  }} className="flex-2 bg-green-500 text-white py-4 rounded-xl text-[10px] font-black uppercase shadow-xl">Complete Order</button>
+              </div>
            </div>
         </div>
       )}
@@ -542,6 +631,8 @@ const App: React.FC = () => {
       <style>{`
         @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
         .animate-slideUp { animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1); }
+        @keyframes slideIn { from { transform: translateX(-20px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        .animate-slideIn { animation: slideIn 0.5s ease-out; }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         @keyframes progress { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }
       `}</style>
