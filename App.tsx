@@ -360,14 +360,21 @@ const App: React.FC = () => {
       const v = allV.find((vend: any) => vend.userId === (user._id || user.id));
       if (!v) throw new Error("Profile missing");
 
+      // SURGICAL FIX: Body Mapping Check
       const payload = {
-        ...serviceForm, images: compressedImages, vendorId: v._id,
-        rate: Number(serviceForm.rate)
+        ...serviceForm, 
+        images: compressedImages, 
+        vendorId: v._id,
+        rate: Number(serviceForm.rate) // Ensure rate is a number for the schema
       };
 
       const isUpdating = !!serviceForm._id;
-      const res = await fetch(`${API_BASE_URL}${isUpdating ? `/services/${serviceForm._id}` : '/services'}`, {
-        method: isUpdating ? 'PUT' : 'POST',
+      
+      // SURGICAL FIX: Verify URL Path - removed redundant "/api" since API_BASE_URL has it
+      const endpoint = isUpdating ? `${API_BASE_URL}/services/${serviceForm._id}` : `${API_BASE_URL}/services`;
+
+      const res = await fetch(endpoint, {
+        method: isUpdating ? 'PUT' : 'POST', // Explicitly set method
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       });
@@ -379,8 +386,17 @@ const App: React.FC = () => {
           setPublishStatus(''); fetchMyServices(); setView('vendor-dashboard'); setLoading(false);
           setIsOtherCategory(false);
         }, 1500);
+      } else {
+          const errData = await res.json();
+          alert(`Error: ${errData.error || 'Server error'}`);
+          setLoading(false);
+          setPublishStatus('');
       }
-    } catch (e) { alert("Save failed"); setLoading(false); }
+    } catch (e) { 
+        alert("Save failed"); 
+        setLoading(false); 
+        setPublishStatus('');
+    }
   };
 
   const handleBooking = async (e: React.FormEvent) => {
@@ -792,10 +808,17 @@ const App: React.FC = () => {
                         type="submit" 
                         disabled={loading}
                         className={`w-full py-5 rounded-2xl font-black uppercase tracking-widest shadow-xl transition-all active:scale-95 ${
-                            loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#fb641b] text-white'
+                            loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-[#fb641b] text-white hover:bg-[#e65a16]'
                         }`}
                      >
-                        {loading ? 'Syncing...' : (serviceForm._id ? 'Update Service' : 'Go Live Now')}
+                        {loading ? (
+                            <span className="flex items-center justify-center gap-2">
+                                <i className="fas fa-circle-notch animate-spin"></i>
+                                {publishStatus || 'Syncing...'}
+                            </span>
+                        ) : (
+                            serviceForm._id ? 'Update Service' : 'Go Live Now'
+                        )}
                      </button>
                   </form>
                </div>
