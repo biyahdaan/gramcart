@@ -1,8 +1,6 @@
-
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
-const jwt = require('jsonwebtoken');
 
 const app = express();
 
@@ -12,7 +10,7 @@ app.use(express.json({ limit: '20mb' }));
 const MONGO_URI = process.env.MONGODB_URI || "mongodb+srv://biyahdaan_db_user:cUzpl0anIuBNuXb9@cluster0.hf1vhp3.mongodb.net/gramcart_db?retryWrites=true&w=majority";
 mongoose.connect(MONGO_URI).then(() => console.log("🚀 GramCart Server Ready")).catch(err => console.error("❌ DB Error:", err));
 
-// --- SCHEMAS ---
+// --- SCHEMAS (Flipkart-Style Expanded) ---
 
 const UserSchema = new mongoose.Schema({
   name: { type: String, required: true },
@@ -31,7 +29,8 @@ const VendorSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', unique: true },
   businessName: { type: String, required: true, index: true },
   upiId: { type: String, default: 'merchant@upi' },
-  location: { lat: Number, lng: Number }
+  location: { lat: Number, lng: Number },
+  totalEarnings: { type: Number, default: 0 } // Flipkart Seller Hub Earnings
 });
 const Vendor = mongoose.models.Vendor || mongoose.model('Vendor', VendorSchema);
 
@@ -40,11 +39,15 @@ const ServiceSchema = new mongoose.Schema({
   category: { type: String, required: true, index: true },
   title: { type: String, required: true },
   description: { type: String },
+  inventoryList: [String], // New: For Items like 2 Bass, 4 Tops, etc.
   unitType: { type: String, default: 'Per Day' },
   rate: { type: Number, required: true },
   images: [String],
   contactNumber: { type: String, required: true },
   upiId: { type: String },
+  advancePercent: { type: Number, default: 10 }, // New: Advance demand
+  variant: { type: String, enum: ['Simple', 'Standard', 'Premium'], default: 'Simple' },
+  isActive: { type: Boolean, default: true }, // Flipkart Out of Stock / Active
   createdAt: { type: Date, default: Date.now }
 });
 const Service = mongoose.models.Service || mongoose.model('Service', ServiceSchema);
@@ -59,14 +62,11 @@ const BookingSchema = new mongoose.Schema({
   pincode: String,
   altMobile: String,
   totalAmount: Number,
-  advanceProof: String,
+  paidAdvance: { type: Number, default: 0 },
+  advanceProof: String, // Screenshot URL
   finalProof: String,
   otp: { type: String, required: true }, 
-  status: { 
-    type: String, 
-    enum: ['pending', 'approved', 'awaiting_advance_verification', 'advance_paid', 'awaiting_final_verification', 'final_paid', 'completed', 'rejected'], 
-    default: 'pending' 
-  },
+  status: { type: String, enum: ['pending', 'approved', 'advance_paid', 'live', 'completed', 'cancelled'], default: 'pending' },
   review: { rating: Number, comment: String },
   createdAt: { type: Date, default: Date.now }
 });
@@ -74,11 +74,10 @@ const Booking = mongoose.models.Booking || mongoose.model('Booking', BookingSche
 
 // --- ROUTES ---
 
+// Fix Register: Automatically create Vendor Hub
 app.post('/api/register', async (req, res) => {
   try {
     const { name, email, mobile, password, role, location } = req.body;
-    const existing = await User.findOne({ $or: [{ email }, { mobile }] });
-    if (existing) return res.status(400).json({ error: "Already Registered" });
     const user = new User({ name, email, mobile, password, role, location });
     await user.save();
     if (role === 'vendor') {
@@ -86,7 +85,7 @@ app.post('/api/register', async (req, res) => {
       await vendor.save();
     }
     res.status(201).json({ user });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.post('/api/login', async (req, res) => {
@@ -98,38 +97,44 @@ app.post('/api/login', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Fixed: Add Service with Itemized Inventory & No Empty ID Error
 app.post('/api/services', async (req, res) => {
   try {
-    const service = new Service(req.body);
+    const { _id, ...serviceData } = req.body; // Remove empty ID if present
+    if (!mongoose.Types.ObjectId.isValid(serviceData.vendorId)) throw new Error("Invalid Vendor ID");
+    const service = new Service(serviceData);
     await service.save();
     res.status(201).json(service);
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
-app.delete('/api/services/:id', async (req, res) => {
+// New: Get Single Service Detail (For Detail View)
+app.get('/api/services/:id', async (req, res) => {
     try {
-      await Service.findByIdAndDelete(req.params.id);
-      res.json({ success: true });
+      const service = await Service.findById(req.params.id).populate('vendorId');
+      res.json(service);
+    } catch (err) { res.status(404).json({ error: "Service not found" }); }
+});
+
+app.put('/api/services/:id', async (req, res) => {
+    try {
+      const service = await Service.findByIdAndUpdate(req.params.id, req.body, { new: true });
+      res.json(service);
     } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
+// Flipkart Style Search: Show Categories & Services
 app.get('/api/search', async (req, res) => {
   try {
-    const { cat } = req.query;
-    const vendors = await Vendor.find().lean();
-    const results = await Promise.all(vendors.map(async (v) => {
-      let query = { vendorId: v._id };
-      if (cat) query.category = cat;
-      const services = await Service.find(query).sort({ createdAt: -1 });
-      return { ...v, services };
-    }));
-    res.json(cat ? results.filter(v => v.services.length > 0) : results);
+    const query = req.query.q ? { title: { $regex: req.query.q, $options: 'i' } } : {};
+    const services = await Service.find({ ...query, isActive: true }).populate('vendorId');
+    res.json(services);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/my-services/:vendorId', async (req, res) => {
   try {
-    const services = await Service.find({ vendorId: req.params.vendorId }).sort({ createdAt: -1 });
+    const services = await Service.find({ vendorId: req.params.vendorId });
     res.json(services);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -139,7 +144,7 @@ app.post('/api/bookings', async (req, res) => {
     const booking = new Booking(req.body);
     await booking.save();
     res.status(201).json(booking);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.get('/api/my-bookings/:role/:id', async (req, res) => {
@@ -148,20 +153,29 @@ app.get('/api/my-bookings/:role/:id', async (req, res) => {
     let query = {};
     if (role === 'vendor') {
         const v = await Vendor.findOne({ userId: id });
-        query = { vendorId: v ? v._id : null };
+        query = { vendorId: v?._id };
     } else {
         query = { customerId: id };
     }
-    const bookings = await Booking.find(query).populate('serviceId').populate('vendorId').populate('customerId').sort({ createdAt: -1 });
+    const bookings = await Booking.find(query)
+      .populate('serviceId')
+      .populate('vendorId')
+      .populate('customerId')
+      .sort({ createdAt: -1 });
     res.json(bookings);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// Advanced Tracker Status Update
 app.patch('/api/bookings/:id/status', async (req, res) => {
   try {
     const booking = await Booking.findByIdAndUpdate(req.params.id, req.body, { new: true });
+    // Update Vendor Earnings if completed
+    if (req.body.status === 'completed') {
+       await Vendor.findByIdAndUpdate(booking.vendorId, { $inc: { totalEarnings: booking.totalAmount } });
+    }
     res.json(booking);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-app.listen(5000, () => console.log('Server running on 5000'));
+app.listen(5000, () => console.log('🚀 GramCart Server running on 5000'));
