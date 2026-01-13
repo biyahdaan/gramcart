@@ -12,7 +12,6 @@ app.use(cors({
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
-// Increased limit for base64 images
 app.use(express.json({ limit: '10mb' }));
 
 // --- DATABASE CONNECTION ---
@@ -36,7 +35,9 @@ const Vendor = mongoose.models.Vendor || mongoose.model('Vendor', new mongoose.S
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', unique: true },
   businessName: { type: String, required: true, index: true },
   rating: { type: Number, default: 5 },
-  isVerified: { type: Boolean, default: false }
+  isVerified: { type: Boolean, default: false },
+  upiId: { type: String }, // Vendor UPI ID
+  advancePercent: { type: Number, default: 10 } // Biyana percentage
 }));
 
 const Service = mongoose.models.Service || mongoose.model('Service', new mongoose.Schema({
@@ -46,7 +47,7 @@ const Service = mongoose.models.Service || mongoose.model('Service', new mongoos
   unitType: { type: String, default: 'Per Day' },
   rate: { type: Number, required: true },
   itemsIncluded: [String],
-  images: [String], // NEW: Array for photo URLs or Base64
+  images: [String],
   description: String,
   contactNumber: { type: String, required: true },
   createdAt: { type: Date, default: Date.now }
@@ -60,10 +61,16 @@ const Booking = mongoose.models.Booking || mongoose.model('Booking', new mongoos
   endDate: Date,
   address: String,
   totalAmount: Number,
+  advanceProof: String, // Screenshot URL/Base64
+  advanceVerified: { type: Boolean, default: false },
   status: { 
     type: String, 
-    enum: ['pending', 'approved', 'rejected', 'completed', 'cancelled'], 
+    enum: ['pending', 'approved', 'advance_paid', 'completed', 'reviewed', 'rejected', 'cancelled'], 
     default: 'pending' 
+  },
+  review: {
+    rating: Number,
+    comment: String
   },
   createdAt: { type: Date, default: Date.now }
 }));
@@ -112,6 +119,13 @@ app.put('/api/services/:id', async (req, res) => {
   } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
+app.delete('/api/services/:id', async (req, res) => {
+  try {
+    await Service.findByIdAndDelete(req.params.id);
+    res.json({ message: "Deleted" });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.get('/api/my-services/:vendorId', async (req, res) => {
   try {
     const services = await Service.find({ vendorId: req.params.vendorId }).sort({ createdAt: -1 });
@@ -155,7 +169,7 @@ app.get('/api/my-bookings/:role/:id', async (req, res) => {
     const bookings = await Booking.find(query)
       .populate('customerId', 'name mobile')
       .populate('serviceId')
-      .populate('vendorId', 'businessName')
+      .populate('vendorId', 'businessName upiId advancePercent')
       .sort({ createdAt: -1 });
     res.json(bookings);
   } catch (err) { res.status(500).json({ error: "Booking fetch error" }); }
@@ -163,11 +177,17 @@ app.get('/api/my-bookings/:role/:id', async (req, res) => {
 
 app.patch('/api/bookings/:id/status', async (req, res) => {
   try {
-    const { status } = req.body;
-    const booking = await Booking.findByIdAndUpdate(req.params.id, { status }, { new: true });
+    const booking = await Booking.findByIdAndUpdate(req.params.id, req.body, { new: true });
     res.json(booking);
   } catch (err) { res.status(500).json({ error: "Status update failed" }); }
 });
 
+app.patch('/api/vendor-profile/:userId', async (req, res) => {
+  try {
+    const updated = await Vendor.findOneAndUpdate({ userId: req.params.userId }, req.body, { new: true });
+    res.json(updated);
+  } catch (err) { res.status(500).json({ error: "Update failed" }); }
+});
+
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🚀 GramCart v4 Server running on ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 GramCart Server running on ${PORT}`));
