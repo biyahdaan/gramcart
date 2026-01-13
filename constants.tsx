@@ -1,12 +1,57 @@
 
 import { Vendor } from './types';
 
-export const CATEGORIES = [
-  { id: 'tent', name: 'Tent House', icon: 'fa-campground', color: 'bg-blue-100 text-blue-600' },
-  { id: 'dj', name: 'DJ & Sound', icon: 'fa-music', color: 'bg-purple-100 text-purple-600' },
-  { id: 'catering', name: 'Catering', icon: 'fa-utensils', color: 'bg-orange-100 text-orange-600' },
-  { id: 'electric', name: 'Lighting', icon: 'fa-lightbulb', color: 'bg-yellow-100 text-yellow-600' },
-];
+export const GLOBAL_CATEGORIES: Record<string, { name: string, icon: string, color: string, items: string[] }> = {
+  tent: { 
+    name: 'Tent House', 
+    icon: 'fa-campground', 
+    color: 'bg-blue-100 text-blue-600',
+    items: ['Waterproof Pandal', 'VIP Chairs', 'Round Tables', 'Sofa Sets', 'Carpeting', 'Entrance Gate', 'Ceiling Cloth', 'Curtains', 'Fans/Coolers']
+  },
+  dj: { 
+    name: 'DJ & Sound', 
+    icon: 'fa-music', 
+    color: 'bg-purple-100 text-purple-600',
+    items: ['Base Speakers', 'Top Speakers', 'Sharpy Lights', 'Smoke Machine', 'LED Floor', 'Console Mixer', 'Wireless Mics', 'Generator Backup']
+  },
+  catering: { 
+    name: 'Catering', 
+    icon: 'fa-utensils', 
+    color: 'bg-orange-100 text-orange-600',
+    items: ['Plates & Spoons', 'Buffet Stalls', 'Water Dispensers', 'Serving Trays', 'Chafing Dishes', 'Main Course Stalls', 'Dessert Counter', 'Waiters']
+  },
+  electric: { 
+    name: 'Lighting', 
+    icon: 'fa-lightbulb', 
+    color: 'bg-yellow-100 text-yellow-600',
+    items: ['Serial Lights', 'Halogen Lamps', 'Focus Lights', 'Garden Lighting', 'Building Decoration', 'Panel Board', 'LED Strips']
+  },
+  photography: { 
+    name: 'Photography', 
+    icon: 'fa-camera', 
+    color: 'bg-green-100 text-green-600',
+    items: ['DSLR Coverage', '4K Video Recording', 'Drone Shot', 'Candid Photography', 'Photo Album', 'Live Streaming', 'Crane/Jimmy']
+  },
+  decoration: { 
+    name: 'Decoration', 
+    icon: 'fa-flower-tulip', 
+    color: 'bg-pink-100 text-pink-600',
+    items: ['Fresh Flowers', 'Artificial Flowers', 'Balloon Decor', 'Stage Backdrop', 'Car Decoration', 'Mandap Setup', 'Selfie Point']
+  },
+  generator: {
+    name: 'Generators',
+    icon: 'fa-bolt',
+    color: 'bg-gray-100 text-gray-600',
+    items: ['15 KVA Generator', '30 KVA Generator', '62 KVA Generator', 'Fuel Extra', 'Operator Included']
+  }
+};
+
+export const CATEGORIES = Object.entries(GLOBAL_CATEGORIES).map(([id, cat]) => ({
+  id,
+  name: cat.name,
+  icon: cat.icon,
+  color: cat.color
+}));
 
 export const MOCK_VENDORS: Vendor[] = [
   {
@@ -20,30 +65,6 @@ export const MOCK_VENDORS: Vendor[] = [
     image: 'https://picsum.photos/seed/tent1/400/300',
     verified: true,
     description: 'Best quality tents for weddings and local festivals. Waterproof material.'
-  },
-  {
-    id: '2',
-    name: 'Royal DJ Group',
-    category: 'dj',
-    rating: 4.5,
-    reviewsCount: 89,
-    price: 3500,
-    distance: 12.5,
-    image: 'https://picsum.photos/seed/dj1/400/300',
-    verified: true,
-    description: 'High bass speakers with laser lighting. Perfect for baraat.'
-  },
-  {
-    id: '3',
-    name: 'Annapurna Catering',
-    category: 'catering',
-    rating: 4.9,
-    reviewsCount: 210,
-    price: 15000,
-    distance: 2.1,
-    image: 'https://picsum.photos/seed/food1/400/300',
-    verified: true,
-    description: 'Traditional village taste with hygiene. Specialized in Halwai services.'
   }
 ];
 

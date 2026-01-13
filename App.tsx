@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Language, User, Translations, UserRole, Translation } from './types';
-import { CATEGORIES as INITIAL_CATEGORIES } from './constants';
+import { CATEGORIES as INITIAL_CATEGORIES, GLOBAL_CATEGORIES } from './constants';
 import { LanguageSwitch } from './components/LanguageSwitch';
 
 const API_BASE_URL = "https://biyahdaan.onrender.com/api"; 
@@ -161,9 +161,10 @@ const App: React.FC = () => {
   const [authForm, setAuthForm] = useState({ identifier: '', email: '', mobile: '', password: '', name: '', role: 'user' });
   const [serviceForm, setServiceForm] = useState({
     title: '', category: 'tent', description: '', rate: '', unitType: 'Per Day', 
-    inventoryList: [] as string[], images: [] as string[], contactNumber: '', _id: '', 
+    inventoryList: [] as {name: string, qty: string}[], images: [] as string[], contactNumber: '', _id: '', 
     upiId: '', variant: 'Simple', blockedDates: [] as string[]
   });
+  const [customItem, setCustomItem] = useState({ name: '', qty: '' });
   const [bookingForm, setBookingForm] = useState({ startDate: '', endDate: '', address: '', pincode: '', altMobile: '' });
   const [reviewForm, setReviewForm] = useState({ rating: 5, comment: '' });
 
@@ -171,7 +172,7 @@ const App: React.FC = () => {
   const proofInputRef = useRef<HTMLInputElement>(null);
   const finalProofInputRef = useRef<HTMLInputElement>(null);
 
-  // --- CORE LOGIC: calculateDistance (Restored) ---
+  // --- CORE LOGIC: calculateDistance ---
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
     const R = 6371; 
     const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -183,7 +184,7 @@ const App: React.FC = () => {
     return R * c;
   };
 
-  // --- CORE LOGIC: compressImage (Restored) ---
+  // --- CORE LOGIC: compressImage ---
   const compressImage = (base64Str: string): Promise<string> => {
     return new Promise((resolve) => {
       const img = new Image();
@@ -202,7 +203,7 @@ const App: React.FC = () => {
     });
   };
 
-  // --- CORE LOGIC: startVoiceSearch (Restored) ---
+  // --- CORE LOGIC: startVoiceSearch ---
   const startVoiceSearch = () => {
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) return alert("Voice Search not supported.");
@@ -217,7 +218,7 @@ const App: React.FC = () => {
     recognition.onerror = () => setIsListening(false);
   };
 
-  // --- Logout Function (New) ---
+  // --- Logout Function ---
   const handleLogout = () => {
     localStorage.removeItem('gramcart_user');
     setUser(null);
@@ -305,16 +306,12 @@ const App: React.FC = () => {
   // --- Actions ---
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // --- 2. HIDDEN SUPERADMIN LOGIN TRIGGER ---
     if (authForm.identifier === "SUPERADMIN" && !isAdminMode) {
         setIsAdminMode(true);
         setAuthForm({...authForm, identifier: ''}); 
         return;
     }
-
     setLoading(true);
-
     if (isAdminMode) {
         try {
             const res = await fetch(`${API_BASE_URL}/admin/settings`);
@@ -330,7 +327,6 @@ const App: React.FC = () => {
             } else { alert("Invalid Master Password"); setLoading(false); return; }
         } catch (err) { setLoading(false); return; }
     }
-
     const endpoint = authMode === 'login' ? '/login' : '/register';
     const payload = authMode === 'login' ? { identifier: authForm.identifier, password: authForm.password } : { ...authForm, location: userCoords };
     try {
@@ -381,8 +377,6 @@ const App: React.FC = () => {
   const handleBooking = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !bookingTarget) return;
-
-    // --- 3. DATA INTEGRITY CHECK: PASTE AT START OF handleBooking ---
     const start = new Date(bookingForm.startDate);
     const end = new Date(bookingForm.endDate);
     const isBlocked = bookingTarget.blockedDates?.some((d: string) => {
@@ -430,20 +424,6 @@ const App: React.FC = () => {
     reader.readAsDataURL(file);
   };
 
-  const handleReviewSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!reviewTarget) return;
-    setLoading(true);
-    try {
-        const res = await fetch(`${API_BASE_URL}/bookings/${reviewTarget._id}/status`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ review: reviewForm })
-        });
-        if (res.ok) { alert("Rated!"); setReviewTarget(null); fetchBookings(); fetchData(); }
-    } catch (e) {} finally { setLoading(false); }
-  };
-
   const updateBookingStatus = async (id: string, payload: any) => {
     setLoading(true);
     try {
@@ -456,7 +436,6 @@ const App: React.FC = () => {
     } catch (e) {} finally { setLoading(false); }
   };
 
-  // --- 4. VENDOR VERIFICATION FUNCTION ---
   const handleVendorVerification = async (bookingId: string, nextStatus: string) => {
     await updateBookingStatus(bookingId, { status: nextStatus, isVerified: true });
     alert("Payment Verified Successfully!");
@@ -512,7 +491,7 @@ const App: React.FC = () => {
                 ))}
               </div>
             )}
-            <button className="w-full py-5 rounded-xl font-black text-white bg-[#fb641b] shadow-xl uppercase text-xs tracking-widest tracking-widest">{loading ? 'Please wait...' : (isAdminMode ? 'System Access' : (authMode === 'login' ? 'Login' : 'Sign Up'))}</button>
+            <button className="w-full py-5 rounded-xl font-black text-white bg-[#fb641b] shadow-xl uppercase text-xs tracking-widest">{loading ? 'Please wait...' : (isAdminMode ? 'System Access' : (authMode === 'login' ? 'Login' : 'Sign Up'))}</button>
           </form>
           {!isAdminMode && (
             <p className="text-center mt-6 text-[11px] font-black text-[#2874f0] cursor-pointer" onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}>{authMode === 'login' ? "New User? Register Now" : "Back to Login"}</p>
@@ -594,7 +573,6 @@ const App: React.FC = () => {
                       <i className="fas fa-wallet absolute -bottom-4 -right-4 text-white/10 text-9xl"></i>
                   </div>
 
-                  {/* NEW FEATURE: Withdrawal & Settlement Hub */}
                   <div className="bg-white p-6 rounded-[2.5rem] shadow-sm mb-6 border border-green-50">
                       <div className="flex justify-between items-center mb-4">
                           <h3 className="font-black uppercase text-[10px] tracking-widest text-gray-400">Settlement Hub</h3>
@@ -628,7 +606,6 @@ const App: React.FC = () => {
                           >
                               {loading ? 'Processing...' : 'Withdraw to UPI'}
                           </button>
-                          <p className="text-[8px] text-center text-gray-400 font-bold italic tracking-tighter">Verified earnings are settled within 24 hours.</p>
                       </div>
                   </div>
 
@@ -681,27 +658,78 @@ const App: React.FC = () => {
                            )}
                         </div>
                      </div>
-                     <input placeholder="Title" className="w-full bg-gray-50 p-4 rounded-xl font-bold" value={serviceForm.title} onChange={e => setServiceForm({...serviceForm, title: e.target.value})} required />
+                     
+                     <input placeholder="Service Title (e.g. Royal Buffet)" className="w-full bg-gray-50 p-4 rounded-xl font-bold" value={serviceForm.title} onChange={e => setServiceForm({...serviceForm, title: e.target.value})} required />
+                     
                      <div className="grid grid-cols-2 gap-4">
-                        <input placeholder="Price (₹)" type="number" className="w-full bg-gray-50 p-4 rounded-xl font-bold" value={serviceForm.rate} onChange={e => setServiceForm({...serviceForm, rate: e.target.value})} required />
-                        <input placeholder="Phone" className="w-full bg-gray-50 p-4 rounded-xl font-bold" value={serviceForm.contactNumber} onChange={e => setServiceForm({...serviceForm, contactNumber: e.target.value})} required />
-                     </div>
-                     <div className="space-y-2">
-                        <p className="text-[9px] font-black text-gray-400 uppercase ml-2">Block Service Calendar</p>
-                        <input type="date" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-bold" onChange={(e) => {
-                            if (e.target.value && !serviceForm.blockedDates.includes(e.target.value)) {
-                                setServiceForm({...serviceForm, blockedDates: [...serviceForm.blockedDates, e.target.value]});
-                            }
-                        }} />
-                        <div className="flex flex-wrap gap-2">
-                            {serviceForm.blockedDates.map(d => (
-                                <span key={d} className="bg-red-50 text-red-500 text-[8px] px-2 py-1 rounded-full font-bold flex items-center gap-1">
-                                    {d} <i className="fas fa-times cursor-pointer" onClick={() => setServiceForm({...serviceForm, blockedDates: serviceForm.blockedDates.filter(x => x !== d)})}></i>
-                                </span>
+                        <select className="w-full bg-gray-50 p-4 rounded-xl font-bold text-xs" value={serviceForm.category} onChange={e => setServiceForm({...serviceForm, category: e.target.value, inventoryList: []})}>
+                            {Object.entries(GLOBAL_CATEGORIES).map(([id, cat]) => (
+                                <option key={id} value={id}>{cat.name}</option>
                             ))}
+                        </select>
+                        <input placeholder="Rate (₹)" type="number" className="w-full bg-gray-50 p-4 rounded-xl font-bold" value={serviceForm.rate} onChange={e => setServiceForm({...serviceForm, rate: e.target.value})} required />
+                     </div>
+
+                     {/* Itemized Inventory Selection (NEW FEATURE 2) */}
+                     <div className="bg-gray-50/50 p-5 rounded-[2rem] border border-gray-100">
+                        <h4 className="text-[10px] font-black uppercase text-gray-400 mb-4 tracking-widest">Select Included Items</h4>
+                        <div className="grid grid-cols-1 gap-2">
+                            {GLOBAL_CATEGORIES[serviceForm.category]?.items.map(item => {
+                                const isSelected = serviceForm.inventoryList.some(i => i.name === item);
+                                return (
+                                    <div key={item} className="flex items-center gap-3 p-3 bg-white rounded-xl shadow-sm border border-gray-50">
+                                        <input 
+                                            type="checkbox" 
+                                            className="w-4 h-4 rounded accent-blue-600"
+                                            checked={isSelected}
+                                            onChange={(e) => {
+                                                if(e.target.checked) {
+                                                    setServiceForm({...serviceForm, inventoryList: [...serviceForm.inventoryList, {name: item, qty: '1'}]});
+                                                } else {
+                                                    setServiceForm({...serviceForm, inventoryList: serviceForm.inventoryList.filter(i => i.name !== item)});
+                                                }
+                                            }}
+                                        />
+                                        <span className="flex-1 text-[11px] font-bold text-gray-700">{item}</span>
+                                        {isSelected && (
+                                            <input 
+                                                placeholder="Qty" 
+                                                className="w-16 bg-gray-50 p-1 rounded-lg text-[10px] text-center font-black border"
+                                                value={serviceForm.inventoryList.find(i => i.name === item)?.qty || ''}
+                                                onChange={(e) => {
+                                                    setServiceForm({...serviceForm, inventoryList: serviceForm.inventoryList.map(i => i.name === item ? {...i, qty: e.target.value} : i)});
+                                                }}
+                                            />
+                                        )}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                        
+                        {/* Custom Item Add */}
+                        <div className="mt-6 pt-6 border-t border-gray-200">
+                            <p className="text-[9px] font-black text-gray-400 uppercase mb-3">Add Custom Item</p>
+                            <div className="flex gap-2">
+                                <input placeholder="Item Name" className="flex-1 bg-white p-3 rounded-xl text-[10px] font-bold border" value={customItem.name} onChange={e => setCustomItem({...customItem, name: e.target.value})} />
+                                <input placeholder="Qty" className="w-16 bg-white p-3 rounded-xl text-[10px] font-bold border" value={customItem.qty} onChange={e => setCustomItem({...customItem, qty: e.target.value})} />
+                                <button type="button" onClick={() => {
+                                    if(!customItem.name) return;
+                                    setServiceForm({...serviceForm, inventoryList: [...serviceForm.inventoryList, customItem]});
+                                    setCustomItem({name: '', qty: ''});
+                                }} className="bg-blue-600 text-white w-10 h-10 rounded-xl flex items-center justify-center"><i className="fas fa-plus"></i></button>
+                            </div>
+                            <div className="flex flex-wrap gap-2 mt-4">
+                                {serviceForm.inventoryList.filter(i => !GLOBAL_CATEGORIES[serviceForm.category]?.items.includes(i.name)).map(i => (
+                                    <span key={i.name} className="bg-blue-50 text-blue-600 text-[9px] px-3 py-1.5 rounded-full font-black flex items-center gap-2">
+                                        {i.name} ({i.qty})
+                                        <i className="fas fa-times cursor-pointer opacity-50" onClick={() => setServiceForm({...serviceForm, inventoryList: serviceForm.inventoryList.filter(x => x.name !== i.name)})}></i>
+                                    </span>
+                                ))}
+                            </div>
                         </div>
                      </div>
-                     <textarea placeholder="Full Description..." className="w-full bg-gray-50 p-5 rounded-xl h-32 text-xs font-bold" value={serviceForm.description} onChange={e => setServiceForm({...serviceForm, description: e.target.value})} />
+
+                     <textarea placeholder="Description..." className="w-full bg-gray-50 p-5 rounded-xl h-24 text-xs font-bold" value={serviceForm.description} onChange={e => setServiceForm({...serviceForm, description: e.target.value})} />
                      <button type="submit" className="w-full bg-[#fb641b] text-white py-5 rounded-2xl font-black uppercase tracking-widest shadow-xl">Go Live</button>
                   </form>
                </div>
@@ -720,8 +748,6 @@ const App: React.FC = () => {
                               <span className={`text-[8px] font-black uppercase px-3 py-1 rounded-full ${b.status === 'completed' ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>{b.status.replace('_',' ')}</span>
                           </div>
                           <Stepper status={b.status} />
-
-                          {/* --- 1. SPLIT PAYMENT UI (Phase 1 & Phase 2) --- */}
                           <div className="mt-4 space-y-2">
                               {user.role === UserRole.USER && (
                                   <div className="p-4 bg-blue-50/50 rounded-2xl border border-blue-100 mb-4">
@@ -745,30 +771,17 @@ const App: React.FC = () => {
                                               <h3 className="text-4xl font-black text-green-600 tracking-[0.8rem] ml-3">{b.otp}</h3>
                                           </div>
                                       )}
-                                      {b.status === 'completed' && !b.review?.rating && (
-                                          <button onClick={() => setReviewTarget(b)} className="w-full bg-green-500 text-white py-4 rounded-xl text-[10px] font-black uppercase">Rate Service</button>
-                                      )}
                                   </div>
                               )}
-
                               {user.role === UserRole.VENDOR && (
                                   <>
                                     {b.status === 'pending' && <button onClick={() => updateBookingStatus(b._id, {status: 'approved'})} className="w-full bg-green-500 text-white py-4 rounded-xl text-[10px] font-black uppercase">Accept Order</button>}
-                                    
-                                    {/* --- 1. VENDOR VERIFICATION BUTTON --- */}
                                     {b.status === 'awaiting_advance_verification' && (
                                         <div className="space-y-2">
                                             <button onClick={() => setScreenshotPreview(b.advanceProof)} className="w-full bg-blue-50 text-blue-600 py-3 rounded-xl text-[10px] font-black uppercase border border-blue-200">View Screenshot</button>
                                             <button onClick={() => handleVendorVerification(b._id, 'advance_paid')} className="w-full bg-green-500 text-white py-3 rounded-xl text-[10px] font-black uppercase shadow-md">Verify Advance Payment</button>
                                         </div>
                                     )}
-                                    
-                                    {b.status === 'awaiting_final_verification' && (
-                                        <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 text-center">
-                                            <p className="text-[10px] font-black text-orange-600 uppercase">Wait! Final Proof under Admin Review</p>
-                                        </div>
-                                    )}
-
                                     {b.status === 'final_paid' && (
                                         <button onClick={() => setOtpTarget({ id: b._id, code: '', correctCode: b.otp })} className="w-full bg-green-600 text-white py-4 rounded-xl text-[10px] font-black uppercase shadow-lg">Verify Completion OTP</button>
                                     )}
@@ -783,7 +796,7 @@ const App: React.FC = () => {
         )}
       </main>
 
-      {/* RECOVERY: Restored Full Booking Form (Address, Pincode) */}
+      {/* Booking Details Modal */}
       {bookingTarget && (
         <div className="fixed inset-0 bg-black/60 z-[400] flex items-center justify-center p-6 backdrop-blur-sm overflow-y-auto">
            <div className="bg-white w-full rounded-[2.5rem] p-10 animate-slideUp shadow-2xl">
@@ -794,12 +807,6 @@ const App: React.FC = () => {
                     <div className="space-y-1"><p className="text-[8px] font-black text-gray-400 uppercase">End</p><input type="date" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-black" required onChange={e => setBookingForm({...bookingForm, endDate: e.target.value})} /></div>
                  </div>
                  <textarea placeholder="Detailed Event Address..." className="w-full bg-gray-50 p-5 rounded-xl text-xs font-black h-24" required onChange={e => setBookingForm({...bookingForm, address: e.target.value})} />
-                 <div className="grid grid-cols-2 gap-4">
-                    <input placeholder="Pincode" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-black" required onChange={e => setBookingForm({...bookingForm, pincode: e.target.value})} />
-                    <input placeholder="Alt Mobile" className="w-full bg-gray-50 p-4 rounded-xl text-xs font-black" onChange={e => setBookingForm({...bookingForm, altMobile: e.target.value})} />
-                 </div>
-                 
-                 {/* --- 2. BOOKING FORM LOGIC: REPLACE THE "Confirm Booking" BUTTON --- */}
                  {(() => {
                     const start = new Date(bookingForm.startDate);
                     const end = new Date(bookingForm.endDate);
@@ -807,19 +814,10 @@ const App: React.FC = () => {
                         const blocked = new Date(d);
                         return blocked >= start && blocked <= end;
                     });
-
                     return (
                         <div className="space-y-3">
-                            {isConflict && (
-                                <p className="text-center text-[10px] font-black text-red-500 uppercase animate-pulse">
-                                    ⚠️ This service is not available for selected dates.
-                                </p>
-                            )}
-                            <button 
-                                type="submit" 
-                                disabled={isConflict}
-                                className={`w-full py-6 rounded-2xl font-black uppercase text-xs shadow-2xl tracking-widest transition-all ${isConflict ? 'bg-gray-300 grayscale cursor-not-allowed' : 'bg-[#fb641b] text-white hover:scale-105'}`}
-                            >
+                            {isConflict && <p className="text-center text-[10px] font-black text-red-500 uppercase animate-pulse">⚠️ Service not available for selected dates.</p>}
+                            <button type="submit" disabled={isConflict} className={`w-full py-6 rounded-2xl font-black uppercase text-xs shadow-2xl tracking-widest transition-all ${isConflict ? 'bg-gray-300 grayscale cursor-not-allowed' : 'bg-[#fb641b] text-white hover:scale-105'}`}>
                                 {isConflict ? 'Already Booked' : 'Confirm Booking'}
                             </button>
                         </div>
@@ -831,7 +829,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Other Modals (Detail, Rating, Screenshot, OTP) */}
+      {/* Service Detail Page (Updated with Inventory View - NEW FEATURE 3) */}
       {detailTarget && (
           <div className="fixed inset-0 bg-black/95 z-[500] overflow-y-auto">
               <div className="max-w-md mx-auto min-h-screen bg-white relative pb-32">
@@ -840,81 +838,39 @@ const App: React.FC = () => {
                   <div className="p-8 space-y-6">
                       <h1 className="text-2xl font-black text-gray-800 uppercase tracking-tighter">{detailTarget.title}</h1>
                       <p className="text-3xl font-black text-gray-900 italic">₹{detailTarget.rate}/-</p>
-                      <div className="bg-gray-50 p-6 rounded-[2rem]">
-                          <p className="text-xs font-bold text-gray-600 leading-relaxed">{detailTarget.description}</p>
-                      </div>
-
-                      {/* --- 2. SERVICE DETAIL PAGE: "Booked Dates" Section --- */}
-                      {detailTarget.blockedDates && detailTarget.blockedDates.length > 0 && (
-                          <div className="bg-red-50 p-4 rounded-2xl border border-red-100">
-                              <h4 className="text-[10px] font-black uppercase text-red-600 mb-2 tracking-widest">Booked Dates</h4>
-                              <div className="flex flex-wrap gap-2">
-                                  {detailTarget.blockedDates.map((d: string) => (
-                                      <span key={d} className="text-[9px] font-bold text-red-500 bg-white px-2 py-1 rounded-lg shadow-sm border border-red-50">
-                                          Already Booked on {d}
-                                      </span>
+                      
+                      {/* Inventory / What's Included */}
+                      {detailTarget.inventoryList && detailTarget.inventoryList.length > 0 && (
+                          <div className="bg-blue-50/50 p-6 rounded-[2rem] border border-blue-100">
+                              <h4 className="text-[10px] font-black uppercase text-blue-600 mb-4 tracking-widest flex items-center gap-2"><i className="fas fa-list-check"></i> What's Included / Inventory</h4>
+                              <div className="space-y-3">
+                                  {detailTarget.inventoryList.map((item: any, idx: number) => (
+                                      <div key={idx} className="flex justify-between items-center pb-2 border-b border-blue-100/50 last:border-0">
+                                          <span className="text-[11px] font-bold text-gray-700">{item.name}</span>
+                                          <span className="bg-white px-2 py-0.5 rounded text-[10px] font-black text-blue-600 shadow-sm">x{item.qty}</span>
+                                      </div>
                                   ))}
                               </div>
                           </div>
                       )}
 
-                      <div className="space-y-4">
-                          <h4 className="font-black text-[10px] uppercase tracking-widest text-gray-400">Reviews</h4>
-                          {bookings.filter(b => b.serviceId?._id === detailTarget._id && b.review?.rating).map(b => (
-                              <div key={b._id} className="p-4 bg-gray-50 rounded-2xl border border-gray-100">
-                                  <div className="flex items-center gap-2 mb-2">
-                                      <div className="bg-green-600 text-white text-[9px] font-black px-1.5 rounded">{b.review.rating} ★</div>
-                                      <p className="text-[9px] font-black uppercase">{b.customerId?.name}</p>
-                                  </div>
-                                  <p className="text-[10px] text-gray-500 font-bold italic">"{b.review.comment}"</p>
+                      {/* Blocked Dates */}
+                      {detailTarget.blockedDates && detailTarget.blockedDates.length > 0 && (
+                          <div className="bg-red-50 p-4 rounded-2xl border border-red-100">
+                              <h4 className="text-[10px] font-black uppercase text-red-600 mb-2 tracking-widest">Booked Dates</h4>
+                              <div className="flex flex-wrap gap-2">
+                                  {detailTarget.blockedDates.map((d: string) => <span key={d} className="text-[9px] font-bold text-red-500 bg-white px-2 py-1 rounded-lg shadow-sm border border-red-50">Already Booked on {d}</span>)}
                               </div>
-                          ))}
-                      </div>
+                          </div>
+                      )}
+
+                      <div className="bg-gray-50 p-6 rounded-[2rem]"><p className="text-xs font-bold text-gray-600 leading-relaxed">{detailTarget.description}</p></div>
                   </div>
                   <div className="fixed bottom-0 left-0 right-0 max-w-md mx-auto p-4 bg-white border-t border-gray-100 flex gap-4 z-[520]">
                       <button onClick={() => toggleWishlist(detailTarget._id)} className="flex-1 py-5 border-2 border-gray-100 rounded-2xl text-[10px] font-black uppercase">{wishlist.includes(detailTarget._id) ? 'Saved' : 'Wishlist'}</button>
                       <button onClick={() => { setBookingTarget(detailTarget); setDetailTarget(null); }} className="flex-2 bg-[#fb641b] text-white py-5 rounded-2xl text-[10px] font-black uppercase shadow-xl">Book Now</button>
                   </div>
               </div>
-          </div>
-      )}
-
-      {reviewTarget && (
-          <div className="fixed inset-0 bg-black/60 z-[600] flex items-center justify-center p-6 backdrop-blur-sm">
-              <div className="bg-white w-full rounded-[2.5rem] p-10 animate-slideUp">
-                  <h2 className="text-xl font-black text-gray-800 mb-6 uppercase text-center">Rate the Experience</h2>
-                  <form onSubmit={handleReviewSubmit} className="space-y-6">
-                      <div className="flex justify-center gap-4">
-                          {[1,2,3,4,5].map(star => (
-                              <button key={star} type="button" onClick={() => setReviewForm({...reviewForm, rating: star})} className={`text-2xl ${reviewForm.rating >= star ? 'text-yellow-400' : 'text-gray-200'}`}><i className="fas fa-star"></i></button>
-                          ))}
-                      </div>
-                      <textarea placeholder="Write a comment..." className="w-full bg-gray-50 p-4 rounded-xl text-xs font-bold h-24 shadow-inner" onChange={e => setReviewForm({...reviewForm, comment: e.target.value})} required />
-                      <button type="submit" className="w-full bg-green-500 text-white py-4 rounded-xl text-[10px] font-black uppercase shadow-xl">Post Review</button>
-                  </form>
-              </div>
-          </div>
-      )}
-
-      {otpTarget && (
-        <div className="fixed inset-0 bg-black/60 z-[600] flex items-center justify-center p-6 backdrop-blur-sm">
-           <div className="bg-white w-full rounded-[2.5rem] p-10 animate-slideUp text-center">
-              <h2 className="text-xl font-black text-gray-800 mb-4 uppercase">Verify Job Completion</h2>
-              <input type="text" maxLength={4} className="w-full bg-gray-100 p-6 rounded-2xl text-4xl font-black text-center tracking-[1rem] outline-none shadow-inner mb-8" value={otpTarget.code} onChange={(e) => setOtpTarget({...otpTarget, code: e.target.value})} />
-              <button onClick={() => {
-                  if (otpTarget.code === otpTarget.correctCode) {
-                      updateBookingStatus(otpTarget.id, { status: 'completed' });
-                      alert("Success!");
-                      setOtpTarget(null);
-                  } else alert("Wrong OTP!");
-              }} className="w-full bg-green-500 text-white py-4 rounded-xl text-[10px] font-black uppercase shadow-xl">Confirm Delivery</button>
-           </div>
-        </div>
-      )}
-
-      {screenshotPreview && (
-          <div className="fixed inset-0 bg-black/95 z-[700] flex items-center justify-center p-6" onClick={() => setScreenshotPreview(null)}>
-              <img src={screenshotPreview} className="w-full max-w-sm rounded-[2rem] shadow-2xl border-4 border-white" />
           </div>
       )}
 
