@@ -58,13 +58,16 @@ const Booking = mongoose.models.Booking || mongoose.model('Booking', new mongoos
   endDate: Date,
   address: String,
   totalAmount: Number,
-  status: { type: String, enum: ['pending', 'confirmed', 'completed', 'cancelled'], default: 'pending' },
+  status: { 
+    type: String, 
+    enum: ['pending', 'approved', 'rejected', 'completed', 'cancelled'], 
+    default: 'pending' 
+  },
   createdAt: { type: Date, default: Date.now }
 }));
 
 // --- ROUTES ---
 
-// Registration with check
 app.post('/api/register', async (req, res) => {
   try {
     const { name, email, mobile, password, role } = req.body;
@@ -86,22 +89,18 @@ app.post('/api/login', async (req, res) => {
   try {
     const { identifier, password } = req.body;
     const user = await User.findOne({ $or: [{ email: identifier }, { mobile: identifier }], password });
-    if (!user) return res.status(401).json({ error: "Invalid login credentials" });
+    if (!user) return res.status(401).json({ error: "Invalid credentials" });
     const token = jwt.sign({ id: user._id }, 'GRAM_SECRET_KEY');
     res.json({ token, user });
   } catch (err) { res.status(500).json({ error: "Login error" }); }
 });
 
-// SERVICE API (Fixed for saving)
 app.post('/api/services', async (req, res) => {
   try {
     const newService = new Service(req.body);
     const saved = await newService.save();
     res.status(201).json(saved);
-  } catch (err) {
-    console.error("Save error:", err);
-    res.status(400).json({ error: "Failed to save service: " + err.message });
-  }
+  } catch (err) { res.status(400).json({ error: err.message }); }
 });
 
 app.get('/api/my-services/:vendorId', async (req, res) => {
@@ -144,9 +143,26 @@ app.post('/api/bookings', async (req, res) => {
 app.get('/api/my-bookings/:role/:id', async (req, res) => {
   try {
     const query = req.params.role === 'vendor' ? { vendorId: req.params.id } : { customerId: req.params.id };
-    const bookings = await Booking.find(query).populate('customerId serviceId vendorId').sort({ createdAt: -1 });
+    const bookings = await Booking.find(query)
+      .populate('customerId', 'name mobile')
+      .populate('serviceId')
+      .populate('vendorId', 'businessName')
+      .sort({ createdAt: -1 });
     res.json(bookings);
   } catch (err) { res.status(500).json({ error: "Booking fetch error" }); }
+});
+
+// NEW: Update Booking Status (Approve/Reject)
+app.patch('/api/bookings/:id/status', async (req, res) => {
+  try {
+    const { status } = req.body;
+    const booking = await Booking.findByIdAndUpdate(
+      req.params.id, 
+      { status }, 
+      { new: true }
+    );
+    res.json(booking);
+  } catch (err) { res.status(500).json({ error: "Status update failed" }); }
 });
 
 const PORT = process.env.PORT || 5000;
