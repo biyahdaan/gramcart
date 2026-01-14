@@ -71,7 +71,10 @@ app.post('/api/register', async (req, res) => {
     const { name, email, mobile, password, role, location } = req.body;
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
+    
+    // Logic Fix: Ensure email is undefined if blank to satisfy sparse index
     const finalEmail = (email && email.trim() !== "") ? email : undefined;
+    
     const user = new User({
       name,
       email: finalEmail,
@@ -92,7 +95,7 @@ app.post('/api/register', async (req, res) => {
     const token = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET);
     res.json({ token, user });
   } catch (err) {
-    res.status(400).json({ error: "Registration failed: Mobile may already exist" });
+    res.status(400).json({ error: "Registration failed: Mobile or Email may already exist" });
   }
 });
 

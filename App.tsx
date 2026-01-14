@@ -319,11 +319,14 @@ const App: React.FC = () => {
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Check for special Admin setup trigger
     if (authForm.identifier === "SUPERADMIN" && !isAdminMode) {
         setIsAdminMode(true);
         setAuthForm({...authForm, identifier: ''}); 
         return;
     }
+    
     setLoading(true);
 
     if (isForgotMode) {
@@ -366,10 +369,20 @@ const App: React.FC = () => {
             } else { alert("Invalid Master Password"); setLoading(false); return; }
         } catch (err) { setLoading(false); return; }
     }
+
     const endpoint = authMode === 'login' ? '/login' : '/register';
+    
+    // Logic Fix: Ensure correct payload mapping for backend
     const payload = authMode === 'login' 
         ? { identifier: authForm.identifier, password: authForm.password } 
-        : { ...authForm, identifier: authForm.mobile, location: userCoords };
+        : { 
+            name: authForm.name, 
+            email: authForm.email, 
+            mobile: authForm.mobile, 
+            password: authForm.password, 
+            role: authForm.role, 
+            location: userCoords 
+          };
         
     try {
       const res = await fetch(`${API_BASE_URL}${endpoint}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
@@ -382,7 +395,9 @@ const App: React.FC = () => {
         if (result.user.role === 'vendor') fetchVendorProfile(result.user._id || result.user.id);
         setView(result.user.role === 'vendor' ? 'vendor-dashboard' : 'home');
       } else alert(result.error);
-    } catch (err) {} finally { setLoading(false); }
+    } catch (err) {
+        alert("Server Error. Please try again later.");
+    } finally { setLoading(false); }
   };
 
   const updateBookingStatus = async (id: string, update: any) => {
