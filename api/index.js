@@ -6,7 +6,7 @@ const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
 app.use(cors());
 
 const MONGO_URI = "mongodb+srv://biyahdaan_db_user:cUzpl0anIuBNuXb9@cluster0.hf1vhp3.mongodb.net/gramcart_db?retryWrites=true&w=majority";
@@ -18,84 +18,95 @@ const connectDB = async () => {
   try {
     await mongoose.connect(MONGO_URI);
     isConnected = true;
+    console.log("✅ DB Connected Successfully");
   } catch (err) {
-    console.error("❌ DB Error:", err);
+    console.error("❌ DB Connection Error:", err);
   }
 };
 
+// --- Models ---
 const UserSchema = new mongoose.Schema({
-  name: String,
-  email: { type: String, unique: true, index: true, sparse: true },
-  mobile: { type: String, unique: true, index: true },
+  name: { type: String, required: true },
+  email: { type: String, unique: true, sparse: true },
+  mobile: { type: String, unique: true, required: true },
   password: { type: String, required: true },
   role: { type: String, default: 'user' },
   location: { lat: Number, lng: Number }
-});
+}, { timestamps: true });
 const User = mongoose.models.User || mongoose.model('User', UserSchema);
 
 const VendorSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-  businessName: { type: String, index: true },
-  rating: { type: Number, default: 5 },
-  isVerified: { type: Boolean, default: false },
-  location: { lat: Number, lng: Number },
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', unique: true },
+  businessName: { type: String, required: true },
   upiId: { type: String, default: '' },
-  totalEarnings: { type: Number, default: 0 }
-});
+  totalEarnings: { type: Number, default: 0 },
+  rating: { type: Number, default: 5 }
+}, { timestamps: true });
 const Vendor = mongoose.models.Vendor || mongoose.model('Vendor', VendorSchema);
+
+const ServiceSchema = new mongoose.Schema({
+  vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor' },
+  title: { type: String, required: true },
+  category: { type: String, required: true },
+  rate: { type: Number, required: true },
+  unitType: { type: String, default: 'Per Day' },
+  images: [String],
+  description: String
+}, { timestamps: true });
+const Service = mongoose.models.Service || mongoose.model('Service', ServiceSchema);
+
+const BookingSchema = new mongoose.Schema({
+  customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  vendorId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vendor' },
+  serviceId: { type: mongoose.Schema.Types.ObjectId, ref: 'Service' },
+  startDate: Date,
+  endDate: Date,
+  address: String,
+  totalAmount: Number,
+  otp: String,
+  status: { type: String, default: 'pending' }
+}, { timestamps: true });
+const Booking = mongoose.models.Booking || mongoose.model('Booking', BookingSchema);
+
+// --- API Endpoints ---
+
+app.post('/api/register', async (req, res) => {
+  await connectDB();
+  try {
+    const { name, email, mobile, password, role } = req.body;
+    const hashedPassword = await bcrypt.hash(password, 10);
+    
+    // Convert empty string to undefined to avoid MongoDB unique index error
+    const finalEmail = (email && email.trim() !== "") ? email : undefined;
+
+    const user = new User({ name, email: finalEmail, mobile, password: hashedPassword, role });
+    await user.save();
+
+    if (role === 'vendor') {
+      const vendor = new Vendor({ userId: user._id, businessName: `${name}'s Services` });
+      await vendor.save();
+    }
+
+    const token = jwt.sign({ id: user._id }, JWT_SECRET);
+    res.json({ token, user });
+  } catch (err) {
+    res.status(400).json({ error: "Registration failed. Mobile/Email already exists." });
+  }
+});
 
 app.post('/api/login', async (req, res) => {
   await connectDB();
   try {
     const { identifier, password } = req.body;
-    const user = await User.findOne({ 
-      $or: [{ email: identifier }, { mobile: identifier }] 
-    });
-    if (!user) return res.status(401).json({ error: "User not found" });
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(401).json({ error: "Invalid credentials" });
-    const token = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET);
-    let vendorData = null;
-    if (user.role === 'vendor') {
-      vendorData = await Vendor.findOne({ userId: user._id });
+    const user = await User.findOne({ $or: [{ email: identifier }, { mobile: identifier }] });
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      return res.status(401).json({ error: "Invalid credentials" });
     }
-    res.json({ token, user, vendor: vendorData });
+    const token = jwt.sign({ id: user._id }, JWT_SECRET);
+    const vendor = user.role === 'vendor' ? await Vendor.findOne({ userId: user._id }) : null;
+    res.json({ token, user, vendor });
   } catch (err) {
-    res.status(500).json({ error: "Login failed" });
-  }
-});
-
-app.post('/api/register', async (req, res) => {
-  await connectDB();
-  try {
-    const { name, email, mobile, password, role, location } = req.body;
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-    
-    // Logic Fix: Ensure email is undefined if blank to satisfy sparse index
-    const finalEmail = (email && email.trim() !== "") ? email : undefined;
-    
-    const user = new User({
-      name,
-      email: finalEmail,
-      mobile,
-      password: hashedPassword,
-      role: role || 'user',
-      location
-    });
-    await user.save();
-    if (user.role === 'vendor') {
-      const vendor = new Vendor({ 
-        userId: user._id, 
-        businessName: `${user.name}'s Shop`,
-        location 
-      });
-      await vendor.save();
-    }
-    const token = jwt.sign({ id: user._id, role: user.role }, JWT_SECRET);
-    res.json({ token, user });
-  } catch (err) {
-    res.status(400).json({ error: "Registration failed: Mobile or Email may already exist" });
+    res.status(500).json({ error: "Login error" });
   }
 });
 
@@ -103,10 +114,70 @@ app.get('/api/search', async (req, res) => {
   await connectDB();
   try {
     const vendors = await Vendor.find().lean();
-    res.json(vendors);
-  } catch (err) {
-    res.status(500).json({ error: "Search failed" });
-  }
+    const results = await Promise.all(vendors.map(async (v) => {
+      const services = await Service.find({ vendorId: v._id });
+      return { ...v, services };
+    }));
+    res.json(results);
+  } catch (err) { res.status(500).json({ error: "Fetch error" }); }
+});
+
+app.post('/api/services', async (req, res) => {
+  await connectDB();
+  try {
+    const service = new Service(req.body);
+    await service.save();
+    res.json(service);
+  } catch (err) { res.status(500).json({ error: "Service creation error" }); }
+});
+
+app.get('/api/my-services/:vendorId', async (req, res) => {
+  await connectDB();
+  try {
+    const services = await Service.find({ vendorId: req.params.vendorId });
+    res.json(services);
+  } catch (err) { res.status(500).json({ error: "Fetch error" }); }
+});
+
+app.post('/api/bookings', async (req, res) => {
+  await connectDB();
+  try {
+    const booking = new Booking(req.body);
+    await booking.save();
+    res.json(booking);
+  } catch (err) { res.status(500).json({ error: "Booking error" }); }
+});
+
+app.get('/api/my-bookings/:role/:id', async (req, res) => {
+  await connectDB();
+  try {
+    const { role, id } = req.params;
+    let query = role === 'vendor' ? { vendorId: id } : { customerId: id };
+    const items = await Booking.find(query).populate('serviceId vendorId customerId').sort({ createdAt: -1 });
+    res.json(items);
+  } catch (err) { res.status(500).json({ error: "Fetch error" }); }
+});
+
+app.patch('/api/bookings/:id/status', async (req, res) => {
+  await connectDB();
+  try {
+    const { status } = req.body;
+    const b = await Booking.findByIdAndUpdate(req.params.id, { status }, { new: true });
+    if (status === 'completed') {
+      await Vendor.findByIdAndUpdate(b.vendorId, { $inc: { totalEarnings: b.totalAmount } });
+    }
+    res.json(b);
+  } catch (err) { res.status(500).json({ error: "Update error" }); }
+});
+
+app.get('/api/admin/all-data', async (req, res) => {
+  await connectDB();
+  try {
+    const users = await User.find();
+    const bookings = await Booking.find().populate('serviceId vendorId customerId');
+    const services = await Service.find().populate('vendorId');
+    res.json({ users, bookings, services });
+  } catch (err) { res.status(500).json({ error: "Admin fetch error" }); }
 });
 
 module.exports = app;
