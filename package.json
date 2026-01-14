@@ -1,7 +1,7 @@
 {
-  "name": "flipkart",
+  "name": "gramcaer",
   "version": "1.0.0",
-  "description": "Full Stack Flipkart Ecommerce",
+  "description": "Full Stack Gramcart Ecommerce",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
